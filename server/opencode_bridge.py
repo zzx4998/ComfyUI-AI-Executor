@@ -2,9 +2,12 @@ import asyncio
 import os
 import shutil
 import subprocess
+import threading
 import time
 
 import aiohttp
+
+from . import installer
 
 PLUGIN_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WORKDIR = os.path.join(PLUGIN_DIR, "opencode")
@@ -130,6 +133,108 @@ def json_images(images):
 
 async def messages(session_id):
     return await _get(f"/session/{session_id}/message")
+
+
+def find_npm():
+    for name in ("npm.cmd", "npm", "npm.exe"):
+        p = shutil.which(name)
+        if p:
+            return p
+    return None
+
+
+def install_opencode_job():
+    job = installer.new_job("opencode_install", "npm i -g opencode-ai")
+    job["status"] = "running"
+
+    def work():
+        try:
+            npm = find_npm()
+            if not npm:
+                job["status"] = "failed"
+                job["error"] = "npm not found. Install Node.js first: https://nodejs.org"
+                return
+            proc = subprocess.Popen(
+                [npm, "i", "-g", "opencode-ai"],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, encoding="utf-8", errors="replace",
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            for line in proc.stdout:
+                installer._log(job, line.rstrip())
+            proc.wait()
+            _state["exe"] = None
+            if proc.returncode == 0 and find_exe():
+                job["status"] = "done"
+            else:
+                job["status"] = "failed"
+                job["error"] = f"npm exited with {proc.returncode}"
+        except Exception as e:
+            job["status"] = "failed"
+            job["error"] = str(e)
+
+    threading.Thread(target=work, daemon=True).start()
+    return job
+
+
+async def providers():
+    h = await health()
+    if not h:
+        return {"error": "opencode server not running"}
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as s:
+        async with s.get(base_url() + "/provider") as r:
+            data = await r.json(content_type=None)
+        async with s.get(base_url() + "/config") as r:
+            cfg = await r.json(content_type=None)
+    out = []
+    for p in data.get("all", []):
+        out.append({
+            "id": p.get("id"),
+            "name": p.get("name") or p.get("id"),
+            "connected": p.get("id") in (data.get("connected") or []),
+            "models": sorted((p.get("models") or {}).keys()),
+        })
+    return {"providers": out, "default": data.get("default") or {}, "current_model": cfg.get("model")}
+
+
+async def set_auth(provider_id, api_key):
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as s:
+        async with s.put(base_url() + f"/auth/{provider_id}", json={"type": "api", "key": api_key}) as r:
+            ok = r.status == 200
+            body = await r.text()
+    return {"ok": ok, "response": body[:500]}
+
+
+async def set_default_model(model):
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as s:
+        async with s.patch(base_url() + "/config", json={"model": model}) as r:
+            ok = r.status == 200
+    return {"ok": ok, "model": model}
+
+
+async def onboarding():
+    installed = find_exe() is not None
+    running = await health() is not None
+    stage = "ready"
+    detail = {}
+    if not installed:
+        stage = "install"
+        detail["npm"] = find_npm() is not None
+    else:
+        prov = await providers() if running else {"error": "not running"}
+        if not running:
+            stage = "start"
+        elif "error" in prov:
+            stage = "start"
+        else:
+            connected = [p for p in prov["providers"] if p["connected"]]
+            detail["connected"] = [p["id"] for p in connected]
+            detail["current_model"] = prov.get("current_model")
+            if not connected:
+                stage = "auth"
+            elif not prov.get("current_model"):
+                stage = "model"
+    return {"stage": stage, "installed": installed, "running": running, "detail": detail}
 
 
 async def session_status():

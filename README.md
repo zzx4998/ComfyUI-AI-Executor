@@ -48,10 +48,23 @@ git clone https://github.com/zzx4998/ComfyUI-AI-Executor.git
 插件是 opencode 的 ComfyUI 专用工具系统：opencode 代理读取规则手册，自主完成
 "需求理解 → 翻译扩充检索 → 筛选工作流 → 装依赖 → 参数注入 → 运行 → 失败自愈"。
 
-1. 安装 opencode：`npm i -g opencode-ai`，并给它配好 LLM（`opencode auth login`）
-2. 面板中展开 **"AI 代理 (opencode)"**，点 "启动"（插件会以 `opencode/` 目录为工作目录拉起 `opencode serve`，加载其中的 `AGENTS.md` 规则手册和 `opencode.json` 权限配置）
-3. 输入需求，点 **"▶ 派单给 AI 代理执行需求"**，日志区实时显示代理的每一步
-4. `opencode/opencode.json` 已限制代理权限：禁止编辑/写文件、bash 仅放行 curl 等只读与 API 调用命令——代理只能用环境，不能动环境
+### 节点形式：AI Executor Agent
+
+在 ComfyUI 画布中搜索添加节点 **"AI Executor Agent (opencode)"**：
+
+- 节点内嵌完整聊天窗口：代理的回复、每一次工具调用（搜索/装节点/下模型/运行）全部实时可见
+- 节点内嵌配置向导：检测安装状态 → 一键安装 opencode（自动 `npm i -g opencode-ai`）→ 启动服务 → 选择 provider/模型并填入 API Key，全程不用离开 ComfyUI 页面
+- 节点可直接执行：`requirement` 输入需求 → 排队运行 → 代理完成后 `summary` 输出最终总结文本（可接给其他节点）
+
+### 面板形式
+
+右下角 "✦ AI Executor" 按钮打开面板，内含同款配置向导和派单入口。
+
+### 首次使用（自动提醒）
+
+ComfyUI 启动后插件自动检测 opencode 状态：未安装 / 未运行 / 未配置 API Key / 未选模型，会自动弹出面板提示下一步；跟着向导点完即可（Node.js 需自行安装：https://nodejs.org）。
+
+`opencode/opencode.json` 已限制代理权限：禁止编辑/写文件、bash 仅放行 curl 等只读与 API 调用命令——代理只能用环境，不能动环境。
 
 ## 设计约束
 

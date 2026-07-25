@@ -285,6 +285,36 @@ async def oc_abort(request):
     return web.json_response(await opencode_bridge.abort(request.match_info["session_id"]))
 
 
+@routes.get("/ai_executor/opencode/onboarding")
+async def oc_onboarding(request):
+    return web.json_response(await opencode_bridge.onboarding())
+
+
+@routes.post("/ai_executor/opencode/install")
+async def oc_install(request):
+    job = opencode_bridge.install_opencode_job()
+    return web.json_response({"job_id": job["id"]})
+
+
+@routes.get("/ai_executor/opencode/providers")
+async def oc_providers(request):
+    return web.json_response(await opencode_bridge.providers())
+
+
+@routes.post("/ai_executor/opencode/auth")
+async def oc_auth(request):
+    body = await request.json()
+    pid = (body.get("provider") or "").strip()
+    key = (body.get("api_key") or "").strip()
+    if not pid or not key:
+        return web.json_response({"ok": False, "error": "provider and api_key required"}, status=400)
+    result = await opencode_bridge.set_auth(pid, key)
+    model = (body.get("model") or "").strip()
+    if result.get("ok") and model:
+        result["model_set"] = await opencode_bridge.set_default_model(f"{pid}/{model}")
+    return web.json_response(result)
+
+
 def setup():
     server = PromptServer.instance
     server.app.add_routes(routes)

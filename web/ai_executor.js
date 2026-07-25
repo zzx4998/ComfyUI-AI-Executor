@@ -126,6 +126,7 @@ function buildPanel() {
     el("button", { style: "width:100%;margin:2px 0;background:#2d6a4f;color:#fff;border:none;padding:6px;border-radius:4px;cursor:pointer;",
       onclick: ocDispatch }, "▶ 派单给 AI 代理执行需求"),
     el("button", { style: "width:100%;margin:2px 0;", onclick: ocAbort }, "中止当前任务"),
+    (() => { const d = el("div"); buildOcSetup(d); return d; })(),
   ]);
 
   const list = el("div", { id: "aie-results" });
@@ -445,5 +446,145 @@ app.registerExtension({
   async setup() {
     buildPanel();
     ocRefreshStatus();
+    onboardingReminder();
+  },
+  beforeRegisterNodeDef(nodeType, nodeData) {
+    if (nodeData.name !== "AIExecutorAgent") return;
+    const orig = nodeType.prototype.onNodeCreated;
+    nodeType.prototype.onNodeCreated = function () {
+      orig?.apply(this, arguments);
+      const box = el("div", { style: "width:400px;padding:6px;background:#1e1e28;color:#ddd;font-size:12px;border-radius:6px;" });
+      const setupDiv = el("div");
+      buildOcSetup(setupDiv);
+      box.append(setupDiv, el("hr", { style: "border:none;border-top:1px solid #333;margin:6px 0;" }));
+      attachOcChat(box);
+      this.addDOMWidget("oc_chat", "custom", box, { serialize: false, hideOnZoom: false });
+      this.setSize([430, 640]);
+    };
   },
 });
+
+async function onboardingReminder() {
+  try {
+    const st = await api("/opencode/onboarding");
+    if (st.stage === "ready") return;
+    const hints = {
+      install: "未检测到 opencode。请在面板/节点中点「一键安装 opencode」(需要 Node.js)",
+      start: "opencode 已安装但未运行。请在面板/节点中点「启动」",
+      auth: "opencode 未配置 LLM API Key。请在面板/节点中完成配置",
+      model: "opencode 未选择默认模型。请在面板/节点中选择模型",
+    };
+    document.getElementById("aie-panel").style.display = "block";
+    logmsg("⚠ AI 代理未完成配置: " + (hints[st.stage] || st.stage));
+  } catch { /* ignore */ }
+}
+
+async function buildOcSetup(container) {
+  container.innerHTML = "";
+  const st = await api("/opencode/onboarding");
+  const line = el("div", { style: "margin:4px 0;color:#bbb;" });
+  container.append(line);
+  if (st.stage === "ready") {
+    line.textContent = `✔ opencode 就绪 (provider: ${(st.detail.connected || []).join(", ")}, 模型: ${st.detail.current_model || "-"})`;
+    return;
+  }
+  if (st.stage === "install") {
+    if (!st.detail.npm) {
+      line.textContent = "✘ 未检测到 Node.js/npm,请先安装 Node.js: https://nodejs.org";
+      return;
+    }
+    line.textContent = "✘ 未安装 opencode";
+    container.append(el("button", { style: "margin:4px 0;", onclick: async (e) => {
+      e.target.disabled = true;
+      logmsg("安装 opencode-ai 中...");
+      const r = await post("/opencode/install", {});
+      const t = setInterval(async () => {
+        const j = await api(`/jobs/${r.job_id}`);
+        if (j.status === "done" || j.status === "failed") {
+          clearInterval(t);
+          logmsg(j.status === "done" ? "opencode 安装完成" : "安装失败: " + (j.error || ""));
+          buildOcSetup(container);
+          ocRefreshStatus();
+        }
+      }, 2000);
+    } }, "一键安装 opencode"));
+    return;
+  }
+  if (st.stage === "start") {
+    line.textContent = "● opencode 已安装,服务未运行";
+    container.append(el("button", { style: "margin:4px 0;", onclick: async () => { await ocStart(); buildOcSetup(container); } }, "启动服务"));
+    return;
+  }
+  line.textContent = st.stage === "auth" ? "● 需要配置 LLM provider 的 API Key" : "● 需要选择默认模型";
+  const prov = await api("/opencode/providers");
+  const list = prov.providers || [];
+  const sel = el("select", { style: "width:100%;margin:4px 0;background:#111;color:#ddd;border:1px solid #444;padding:4px;" });
+  for (const p of list) sel.append(el("option", { value: p.id }, `${p.name}${p.connected ? " ✔" : ""}`));
+  const modelSel = el("select", { style: "width:100%;margin:4px 0;background:#111;color:#ddd;border:1px solid #444;padding:4px;" });
+  const fillModels = () => {
+    modelSel.innerHTML = "";
+    const p = list.find(x => x.id === sel.value);
+    for (const m of p?.models || []) modelSel.append(el("option", { value: m }, m));
+  };
+  sel.addEventListener("change", fillModels);
+  fillModels();
+  const key = el("input", { type: "password", placeholder: "api_key", style: "width:100%;margin:4px 0;background:#111;color:#ddd;border:1px solid #444;padding:4px;" });
+  container.append(sel, modelSel, key, el("button", { style: "margin:4px 0;", onclick: async () => {
+    const r = await post("/opencode/auth", { provider: sel.value, api_key: key.value.trim(), model: modelSel.value });
+    logmsg(r.ok ? "opencode 配置已保存" : "配置失败: " + (r.error || r.response || ""));
+    buildOcSetup(container);
+    ocRefreshStatus();
+  } }, "保存配置"));
+}
+
+function attachOcChat(container) {
+  const chat = el("div", { style: "background:#111;border:1px solid #333;border-radius:6px;padding:6px;height:280px;overflow-y:auto;margin:4px 0;" });
+  const input = el("textarea", { placeholder: "输入任务,例如: 搜索一个 flux 文生图工作流并跑一张赛博朋克城市", style: "width:100%;height:44px;background:#111;color:#ddd;border:1px solid #444;padding:4px;" });
+  const btn = el("button", { style: "margin-top:4px;background:#2d6a4f;color:#fff;border:none;padding:5px 14px;border-radius:4px;cursor:pointer;" }, "发送");
+  let session = null, timer = null;
+  const seen = new Set();
+  const addMsg = (who, text, color) => {
+    const d = el("div", { style: `margin:4px 0;padding:4px 6px;border-radius:4px;background:${color};white-space:pre-wrap;word-break:break-word;` });
+    d.textContent = `${who}: ${text}`;
+    chat.append(d);
+    chat.scrollTop = chat.scrollHeight;
+  };
+  const poll = async () => {
+    if (!session) return;
+    try {
+      const msgs = await api(`/opencode/messages/${session}`);
+      if (Array.isArray(msgs)) for (const m of msgs) {
+        const role = m.info?.role;
+        for (const p of m.parts || []) {
+          const key = (m.info?.id || "") + ":" + (p.id || Math.random());
+          if (seen.has(key)) continue;
+          if (p.type === "text" && p.text) {
+            seen.add(key);
+            addMsg(role === "user" ? "我" : "代理", p.text, role === "user" ? "#264f78" : "#1f2d1f");
+          } else if (p.type === "tool" && (p.state?.status === "completed" || p.state?.status === "error")) {
+            seen.add(key);
+            addMsg("工具", `${p.tool || ""} ${p.state.status === "completed" ? "✓" : "✗"} ${p.state?.title || ""}`, "#2a2a3a");
+          }
+        }
+      }
+      const statuses = await api("/opencode/sessions_status");
+      if (statuses?.[session]?.type === "idle") {
+        clearInterval(timer);
+        timer = null;
+        addMsg("系统", "— 任务结束 —", "#333");
+      }
+    } catch { /* keep polling */ }
+  };
+  btn.addEventListener("click", async () => {
+    const req = input.value.trim();
+    if (!req) return;
+    input.value = "";
+    addMsg("我", req, "#264f78");
+    const r = await post("/opencode/dispatch", { requirement: req });
+    if (!r.ok) { addMsg("系统", "派单失败: " + (r.error || ""), "#4a1f1f"); return; }
+    session = r.session_id;
+    if (timer) clearInterval(timer);
+    timer = setInterval(poll, 2500);
+  });
+  container.append(chat, input, btn);
+}

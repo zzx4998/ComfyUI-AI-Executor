@@ -6,7 +6,7 @@ import os
 from aiohttp import web
 from server import PromptServer
 
-from . import analyzer, deps, installer, local_index, opencode_bridge, runner
+from . import analyzer, deps, installer, local_index, opencode_bridge, proxy, runner
 from .sources import civitai, comfyworkflows, github_collections, openart
 
 PLUGIN_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -286,6 +286,42 @@ async def oc_sessions_status(request):
 @routes.post("/ai_executor/opencode/abort/{session_id}")
 async def oc_abort(request):
     return web.json_response(await opencode_bridge.abort(request.match_info["session_id"]))
+
+
+@routes.post("/ai_executor/llm/models")
+async def llm_models(request):
+    body = await request.json()
+    base = (body.get("base") or "").strip().rstrip("/")
+    key = (body.get("api_key") or "").strip()
+    proto = (body.get("proto") or "openai").strip()
+    if not base or not key:
+        return web.json_response({"ok": False, "error": "base and api_key required"}, status=400)
+    headers = {"Authorization": f"Bearer {key}"}
+    if proto == "anthropic":
+        headers = {"x-api-key": key, "anthropic-version": "2023-06-01"}
+    px = proxy.get_proxy()
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as s:
+            async with s.get(base + "/models", headers=headers, proxy=px) as r:
+                text = await r.text()
+                if (r.status in (401, 403)) and proto == "anthropic":
+                    async with s.get(base + "/models", headers={"Authorization": f"Bearer {key}", "anthropic-version": "2023-06-01"}, proxy=px) as r2:
+                        text = await r2.text()
+                        return _parse_models_response(r2.status, text)
+                return _parse_models_response(r.status, text)
+    except Exception as e:
+        return web.json_response({"ok": False, "error": str(e)})
+
+
+def _parse_models_response(status, text):
+    if status != 200:
+        return web.json_response({"ok": False, "error": f"HTTP {status}: {text[:300]}"})
+    try:
+        data = json.loads(text)
+    except Exception:
+        return web.json_response({"ok": False, "error": "response is not JSON"})
+    ids = sorted(m.get("id") for m in (data.get("data") or []) if m.get("id"))
+    return web.json_response({"ok": True, "models": ids})
 
 
 @routes.get("/ai_executor/opencode/onboarding")

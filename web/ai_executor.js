@@ -119,42 +119,48 @@ function buildPanel() {
   ]);
 
   const reqBox = el("div", { class: "aie-card" }, [
-    el("div", { style: "font-weight:600;color:#cfd2e0;" }, ["需求 ", helpIcon("用自然语言描述你要做的事,中文即可。点「搜索工作流」手动挑;点「AI 帮我选」让上面的 LLM 挑;或在下方「AI 代理」区派单给 opencode 全自动执行。")]),
+    el("div", { style: "font-weight:600;color:#cfd2e0;" }, ["需求 ", helpIcon("用自然语言描述你要做的事,中文即可。点「派单」后 opencode 代理全自动完成: 理解需求→翻译扩充检索→筛选工作流→装缺失节点/模型→参数注入→运行→失败重试。可在下方「AI 代理」区或「AI Executor Agent」节点里看实时过程。")]),
     el("textarea", { id: "aie-req", class: "aie-input", placeholder: "例如: 把这张照片变成吉卜力风格并放大到4K", style: "height:48px;" }),
     el("div", { style: "display:flex;gap:4px;margin-top:4px;" }, [
-      el("button", { class: "aie-btn", onclick: () => doSearch() }, "搜索工作流"),
-      el("button", { class: "aie-btn", onclick: () => aiPick() }, "AI 帮我选"),
+      el("button", { class: "aie-btn aie-btn-primary", style: "flex:1;padding:7px;", onclick: ocDispatch }, "▶ 派单给 AI 代理执行"),
+      el("button", { class: "aie-btn", onclick: ocAbort }, "中止"),
     ]),
   ]);
 
-  const srcRow = el("div", { class: "aie-card", style: "display:flex;gap:8px;flex-wrap:wrap;align-items:center;" },
-    [["来源 ", helpIcon("勾选搜索哪些站点: local=本地工作流库; civitai/comfyworkflows/openart/github=在线工作流站。在线站点建议挂代理。")],
-     ...["local", "civitai", "comfyworkflows", "openart", "github"].map(s =>
-      el("label", { style: "cursor:pointer;" }, [
-        el("input", { type: "checkbox", class: "aie-src", value: s, checked: s === "local" || s === "civitai" ? "checked" : null }), " " + s,
-      ])
-    )]);
-
   const ocBox = el("details", { class: "aie-card" }, [
-    el("summary", {}, ["AI 代理 (opencode) ", helpIcon("全自动模式: opencode 代理读取内置规则手册,自主完成 需求理解→翻译扩充检索→筛选工作流→装缺失节点/模型→参数注入→运行→失败重试。首次使用按下方向导完成安装和配置。也可以把「AI Executor Agent」节点拖到画布里用。")]),
+    el("summary", {}, ["AI 代理 (opencode) ", helpIcon("opencode 服务状态与配置向导。首次使用按提示完成安装;LLM 配置在上方「LLM 设置」里,保存后自动同步。代理执行过程会显示在下面日志区。")]),
     el("div", { style: "display:flex;gap:4px;align-items:center;margin:4px 0;" }, [
       el("span", { id: "aie-oc-dot", style: "width:8px;height:8px;border-radius:50%;background:#666;display:inline-block;" }),
       el("span", { id: "aie-oc-status", style: "color:#999;flex:1;" }, "未检测"),
       el("button", { class: "aie-btn", onclick: ocStart }, "启动"),
       el("button", { class: "aie-btn", onclick: ocStop }, "停止"),
     ]),
-    el("button", { class: "aie-btn aie-btn-primary", style: "width:100%;margin:2px 0;padding:6px;",
-      onclick: ocDispatch }, "▶ 派单给 AI 代理执行需求"),
-    el("button", { class: "aie-btn", style: "width:100%;margin:2px 0;", onclick: ocAbort }, "中止当前任务"),
     (() => { const d = el("div"); buildOcSetup(d); return d; })(),
   ]);
 
-  const listHead = el("div", { style: "font-weight:600;color:#cfd2e0;margin:2px 0;" }, ["搜索结果 ", helpIcon("点击卡片拉取工作流 JSON 并自动检查依赖。卡片显示: 来源/标题/发布日期/底模/作者/样例图。")]);
-  const list = el("div", { id: "aie-results" });
-  const detail = el("div", { id: "aie-detail", style: "margin-top:8px;" });
+  const manualBox = el("details", { class: "aie-card" }, [
+    el("summary", {}, ["手动模式 (高级) ", helpIcon("不走代理,自己搜自己挑: 勾选来源站点→搜索→点卡片检查依赖→手动运行。「AI 帮我选」用 LLM 设置里的模型从结果中挑一个。")]),
+    el("div", { style: "display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:4px 0;" },
+      ["local", "civitai", "openart", "github"].map(s =>
+        el("label", { style: "cursor:pointer;" }, [
+          el("input", { type: "checkbox", class: "aie-src", value: s, checked: s === "local" || s === "civitai" ? "checked" : null }), " " + s,
+        ])
+      )),
+    el("div", { style: "display:flex;gap:4px;margin:4px 0;" }, [
+      el("button", { class: "aie-btn", onclick: () => doSearch() }, "搜索工作流"),
+      el("button", { class: "aie-btn", onclick: () => aiPick() }, "AI 帮我选"),
+    ]),
+    (() => {
+      const d = el("div");
+      d.append(el("div", { style: "font-weight:600;color:#cfd2e0;margin:2px 0;" }, "搜索结果"));
+      d.append(el("div", { id: "aie-results" }), el("div", { id: "aie-detail", style: "margin-top:8px;" }));
+      return d;
+    })(),
+  ]);
+
   const log = el("pre", { id: "aie-log", style: "background:#14141d;border:1px solid #2e2e3a;border-radius:6px;padding:6px;max-height:160px;overflow:auto;white-space:pre-wrap;margin-top:8px;" });
 
-  root.append(title, llmBox, reqBox, srcRow, ocBox, listHead, list, detail, log);
+  root.append(title, llmBox, reqBox, ocBox, manualBox, log);
   document.body.append(root);
 
   const styleTag = el("style", {}, `

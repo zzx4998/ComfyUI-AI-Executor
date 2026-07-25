@@ -3,6 +3,8 @@ import functools
 
 import aiohttp
 
+from . import proxy
+
 DEFAULT_TIMEOUT = aiohttp.ClientTimeout(total=30, connect=10)
 
 DEFAULT_HEADERS = {
@@ -16,7 +18,7 @@ async def fetch_json(url, params=None, headers=None, timeout=DEFAULT_TIMEOUT):
     if headers:
         merged.update(headers)
     async with aiohttp.ClientSession(timeout=timeout, headers=merged) as session:
-        async with session.get(url, params=params) as resp:
+        async with session.get(url, params=params, proxy=proxy.get_proxy()) as resp:
             resp.raise_for_status()
             return await resp.json(content_type=None)
 
@@ -27,7 +29,7 @@ async def fetch_bytes(url, headers=None, timeout=None, chunk_cb=None):
     if headers:
         merged.update(headers)
     async with aiohttp.ClientSession(timeout=timeout, headers=merged) as session:
-        async with session.get(url) as resp:
+        async with session.get(url, proxy=proxy.get_proxy()) as resp:
             resp.raise_for_status()
             buf = bytearray()
             async for chunk in resp.content.iter_chunked(1 << 16):

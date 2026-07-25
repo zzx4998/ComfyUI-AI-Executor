@@ -8,14 +8,13 @@ from aiohttp import web
 from server import PromptServer
 
 from . import analyzer, deps, installer, local_index, opencode_bridge, proxy, runner
-from .sources import civitai, comfyworkflows, github_collections, openart
+from .sources import civitai, github_collections, openart
 
 PLUGIN_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONFIG_PATH = os.path.join(PLUGIN_DIR, "config.json")
 
 SOURCES = {
     "civitai": civitai,
-    "comfyworkflows": comfyworkflows,
     "openart": openart,
     "github": github_collections,
 }
@@ -74,7 +73,7 @@ async def set_settings(request):
 @routes.get("/ai_executor/search")
 async def search(request):
     query = request.query.get("query", "")
-    sources = [s for s in request.query.get("sources", "local,civitai,comfyworkflows,openart,github").split(",") if s]
+    sources = [s for s in request.query.get("sources", "local,civitai,openart,github").split(",") if s]
     limit = int(request.query.get("limit", "12"))
     cfg = _load_config()
     results = []

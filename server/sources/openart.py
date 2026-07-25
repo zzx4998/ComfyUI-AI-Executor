@@ -3,6 +3,7 @@ import re
 
 import aiohttp
 
+from .. import proxy
 from ..http_utils import DEFAULT_HEADERS, normalize_result
 
 BASE = "https://openart.ai"
@@ -11,7 +12,7 @@ BASE = "https://openart.ai"
 async def search(query, limit=20, page=1):
     url = f"{BASE}/workflows?search={query}"
     async with aiohttp.ClientSession(headers=DEFAULT_HEADERS) as session:
-        async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+        async with session.get(url, timeout=aiohttp.ClientTimeout(total=30), proxy=proxy.get_proxy()) as resp:
             resp.raise_for_status()
             html = await resp.text()
     m = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', html, re.S)
@@ -45,7 +46,7 @@ async def search(query, limit=20, page=1):
 async def get_workflow(result):
     wid = result.get("id")
     async with aiohttp.ClientSession(headers=DEFAULT_HEADERS) as session:
-        async with session.get(f"{BASE}/workflows/{wid}", timeout=aiohttp.ClientTimeout(total=30)) as resp:
+        async with session.get(f"{BASE}/workflows/{wid}", timeout=aiohttp.ClientTimeout(total=30), proxy=proxy.get_proxy()) as resp:
             resp.raise_for_status()
             html = await resp.text()
     m = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', html, re.S)

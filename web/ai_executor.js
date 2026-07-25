@@ -700,9 +700,15 @@ async function buildOcSetup(container) {
   }
   line.textContent = st.stage === "auth" ? "● 需要配置 LLM provider 的 API Key" : "● 需要选择默认模型";
   const prov = await api("/opencode/providers");
-  const list = prov.providers || [];
+  const list = (prov.providers || []).slice().sort((a, b) =>
+    (b.connected - a.connected) || ((b.id.includes("coding")) - (a.id.includes("coding"))));
   const sel = el("select", { class: "aie-input" });
-  for (const p of list) sel.append(el("option", { value: p.id }, `${p.name}${p.connected ? " ✔" : ""}`));
+  for (const p of list) {
+    const tag = p.id.includes("coding") ? " [订阅/Coding Plan]" : "";
+    sel.append(el("option", { value: p.id }, `${p.name}${tag}${p.connected ? " ✔" : ""}`));
+  }
+  container.append(el("div", { style: "color:#777;font-size:11px;margin-top:4px;" },
+    "提示: 订阅类 Key (Kimi For Coding / GLM Coding Plan 等) 必须选带 [订阅/Coding Plan] 标记的 provider,选普通平台会 401"));
   const key = el("input", { type: "password", placeholder: "api_key", class: "aie-input", style: "flex:1;margin:4px 0;" });
   const connMsg = el("span", { style: "color:#999;font-size:11px;" });
   const modelSel = el("select", { class: "aie-input", style: "display:none;" });

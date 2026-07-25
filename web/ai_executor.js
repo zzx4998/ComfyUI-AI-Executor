@@ -10,6 +10,22 @@ const state = {
   jobs: {},
 };
 
+const LLM_PRESETS = [
+  { name: "选择服务商...", base: "", model: "" },
+  { name: "Kimi (月之暗面)", base: "https://api.moonshot.cn/v1", model: "kimi-k2-0905-preview" },
+  { name: "DeepSeek", base: "https://api.deepseek.com/v1", model: "deepseek-chat" },
+  { name: "通义千问 (阿里)", base: "https://dashscope.aliyuncs.com/compatible-mode/v1", model: "qwen-plus" },
+  { name: "智谱 GLM", base: "https://open.bigmodel.cn/api/paas/v4", model: "glm-4-flash" },
+  { name: "硅基流动 SiliconFlow", base: "https://api.siliconflow.cn/v1", model: "Qwen/Qwen2.5-7B-Instruct" },
+  { name: "火山方舟 (字节)", base: "https://ark.cn-beijing.volces.com/api/v3", model: "" },
+  { name: "OpenAI", base: "https://api.openai.com/v1", model: "gpt-4o-mini" },
+  { name: "OpenRouter", base: "https://openrouter.ai/api/v1", model: "" },
+  { name: "Groq", base: "https://api.groq.com/openai/v1", model: "llama-3.3-70b-versatile" },
+  { name: "Gemini (Google)", base: "https://generativelanguage.googleapis.com/v1beta/openai", model: "gemini-2.0-flash" },
+  { name: "Ollama (本地)", base: "http://127.0.0.1:11434/v1", model: "qwen2.5" },
+  { name: "自定义", base: "", model: "" },
+];
+
 function el(tag, attrs = {}, children = []) {
   const e = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
@@ -48,13 +64,36 @@ function buildPanel() {
     z-index:9999;padding:12px;font-size:12px;display:none;box-shadow:0 4px 24px #000a;
   `});
 
-  const title = el("div", { style: "display:flex;justify-content:space-between;margin-bottom:8px;" }, [
+  const title = el("div", { style: "display:flex;justify-content:space-between;margin-bottom:8px;cursor:move;user-select:none;" }, [
     el("b", {}, "AI Executor"),
     el("a", { href: "#", style: "color:#888", onclick: (e) => { e.preventDefault(); root.style.display = "none"; } }, "✕"),
   ]);
+  let pdrag = null;
+  title.addEventListener("pointerdown", (e) => {
+    if (e.target.tagName === "A") return;
+    pdrag = { sx: e.clientX, sy: e.clientY, ox: root.offsetLeft, oy: root.offsetTop };
+    title.setPointerCapture(e.pointerId);
+  });
+  title.addEventListener("pointermove", (e) => {
+    if (!pdrag) return;
+    root.style.left = Math.max(0, Math.min(window.innerWidth - 100, pdrag.ox + e.clientX - pdrag.sx)) + "px";
+    root.style.top = Math.max(0, Math.min(window.innerHeight - 60, pdrag.oy + e.clientY - pdrag.sy)) + "px";
+    root.style.right = "auto";
+  });
+  title.addEventListener("pointerup", () => { pdrag = null; });
 
   const llmBox = el("details", { style: "margin-bottom:8px;" }, [
     el("summary", {}, "LLM 设置 (OpenAI 兼容 API)"),
+    el("select", { id: "aie-llm-preset", style: "width:100%;margin:4px 0;background:#111;color:#ddd;border:1px solid #444;padding:4px;",
+      onchange: (e) => {
+        const p = LLM_PRESETS[e.target.selectedIndex];
+        if (p && p.base) {
+          document.getElementById("aie-llm-base").value = p.base;
+          const m = document.getElementById("aie-llm-model");
+          if (p.model) m.value = p.model;
+        }
+      } },
+      LLM_PRESETS.map(p => el("option", {}, p.name))),
     el("input", { id: "aie-llm-base", placeholder: "base_url 如 https://api.moonshot.cn/v1", style: "width:100%;margin:4px 0;background:#111;color:#ddd;border:1px solid #444;padding:4px;" }),
     el("input", { id: "aie-llm-key", placeholder: "api_key", type: "password", style: "width:100%;margin:4px 0;background:#111;color:#ddd;border:1px solid #444;padding:4px;" }),
     el("input", { id: "aie-llm-model", placeholder: "model 如 kimi-k2 / deepseek-chat", style: "width:100%;margin:4px 0;background:#111;color:#ddd;border:1px solid #444;padding:4px;" }),
@@ -83,10 +122,38 @@ function buildPanel() {
   root.append(title, llmBox, reqBox, srcRow, list, detail, log);
   document.body.append(root);
 
+  const savedPos = JSON.parse(localStorage.getItem("aie-fab-pos") || "null");
   const fab = el("button", { style: `
-    position:fixed;bottom:80px;right:10px;z-index:9999;border-radius:50%;width:44px;height:44px;
-    background:#5a4fcf;color:#fff;border:none;cursor:pointer;font-size:18px;`,
-    onclick: () => { root.style.display = root.style.display === "none" ? "block" : "none"; } }, "AI");
+    position:fixed;${savedPos ? `left:${savedPos.x}px;top:${savedPos.y}px;` : "bottom:80px;right:10px;"}
+    z-index:9999;border-radius:50%;width:44px;height:44px;
+    background:#5a4fcf;color:#fff;border:none;cursor:grab;font-size:18px;touch-action:none;` }, "AI");
+  let drag = null;
+  fab.addEventListener("pointerdown", (e) => {
+    drag = { sx: e.clientX, sy: e.clientY, ox: fab.offsetLeft, oy: fab.offsetTop, moved: false };
+    fab.setPointerCapture(e.pointerId);
+    fab.style.cursor = "grabbing";
+  });
+  fab.addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    const dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
+    if (Math.abs(dx) + Math.abs(dy) > 4) drag.moved = true;
+    if (drag.moved) {
+      fab.style.left = Math.max(0, Math.min(window.innerWidth - 44, drag.ox + dx)) + "px";
+      fab.style.top = Math.max(0, Math.min(window.innerHeight - 44, drag.oy + dy)) + "px";
+      fab.style.right = "auto";
+      fab.style.bottom = "auto";
+    }
+  });
+  fab.addEventListener("pointerup", (e) => {
+    fab.style.cursor = "grab";
+    if (!drag) return;
+    if (drag.moved) {
+      localStorage.setItem("aie-fab-pos", JSON.stringify({ x: fab.offsetLeft, y: fab.offsetTop }));
+    } else {
+      root.style.display = root.style.display === "none" ? "block" : "none";
+    }
+    drag = null;
+  });
   document.body.append(fab);
 
   loadLLMSettings();
@@ -103,6 +170,8 @@ async function loadLLMSettings() {
     document.getElementById("aie-llm-base").value = cfg.llm.base_url || "";
     document.getElementById("aie-llm-key").value = cfg.llm.api_key || "";
     document.getElementById("aie-llm-model").value = cfg.llm.model || "";
+    const idx = LLM_PRESETS.findIndex(p => p.base && p.base === cfg.llm.base_url);
+    document.getElementById("aie-llm-preset").selectedIndex = idx >= 0 ? idx : LLM_PRESETS.length - 1;
   }
 }
 

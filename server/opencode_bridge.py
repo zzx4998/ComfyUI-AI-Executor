@@ -207,13 +207,16 @@ def build_runtime_config():
     key = (llm.get("api_key") or "").strip()
     model = (llm.get("model") or "").strip()
     if base and key:
+        proto = (llm.get("proto") or "openai").strip()
+        npm = "@ai-sdk/anthropic" if proto == "anthropic" else "@ai-sdk/openai-compatible"
         providers = data.setdefault("provider", {})
         custom = providers.setdefault("aie-custom", {
-            "npm": "@ai-sdk/openai-compatible",
+            "npm": npm,
             "name": "自定义 LLM (来自插件 LLM 设置)",
             "options": {"baseURL": "{env:AIE_LLM_BASE}", "apiKey": "{env:AIE_LLM_KEY}"},
             "models": {},
         })
+        custom["npm"] = npm
         if model:
             custom.setdefault("models", {})[model] = {"name": model}
             data["model"] = f"aie-custom/{model}"

@@ -19,18 +19,18 @@
   },
   "provider": {
     "aie-custom": {
-      "npm": "@ai-sdk/openai-compatible",
+      "npm": "@ai-sdk/anthropic",
       "name": "自定义 LLM (来自插件 LLM 设置)",
       "options": {
         "baseURL": "{env:AIE_LLM_BASE}",
         "apiKey": "{env:AIE_LLM_KEY}"
       },
       "models": {
-        "kimi-k2-0905-preview": {
-          "name": "kimi-k2-0905-preview"
+        "k3": {
+          "name": "k3"
         }
       }
     }
   },
-  "model": "aie-custom/kimi-k2-0905-preview"
+  "model": "aie-custom/k3"
 }

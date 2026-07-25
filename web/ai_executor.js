@@ -12,18 +12,23 @@ const state = {
 
 const LLM_PRESETS = [
   { name: "选择服务商...", base: "", model: "" },
-  { name: "Kimi (月之暗面)", base: "https://api.moonshot.cn/v1", model: "kimi-k2-0905-preview" },
-  { name: "DeepSeek", base: "https://api.deepseek.com/v1", model: "deepseek-chat" },
-  { name: "通义千问 (阿里)", base: "https://dashscope.aliyuncs.com/compatible-mode/v1", model: "qwen-plus" },
-  { name: "智谱 GLM", base: "https://open.bigmodel.cn/api/paas/v4", model: "glm-4-flash" },
-  { name: "硅基流动 SiliconFlow", base: "https://api.siliconflow.cn/v1", model: "Qwen/Qwen2.5-7B-Instruct" },
-  { name: "火山方舟 (字节)", base: "https://ark.cn-beijing.volces.com/api/v3", model: "" },
-  { name: "OpenAI", base: "https://api.openai.com/v1", model: "gpt-4o-mini" },
-  { name: "OpenRouter", base: "https://openrouter.ai/api/v1", model: "" },
-  { name: "Groq", base: "https://api.groq.com/openai/v1", model: "llama-3.3-70b-versatile" },
-  { name: "Gemini (Google)", base: "https://generativelanguage.googleapis.com/v1beta/openai", model: "gemini-2.0-flash" },
-  { name: "Ollama (本地)", base: "http://127.0.0.1:11434/v1", model: "qwen2.5" },
-  { name: "自定义", base: "", model: "" },
+  { name: "Kimi For Coding (订阅)", base: "https://api.kimi.com/coding/v1", model: "k3", proto: "anthropic" },
+  { name: "GLM Coding Plan (智谱订阅)", base: "https://open.bigmodel.cn/api/coding/paas/v4", model: "glm-5.2", proto: "openai" },
+  { name: "阿里 Coding Plan (订阅)", base: "https://coding.dashscope.aliyuncs.com/v1", model: "qwen3-coder-plus", proto: "openai" },
+  { name: "腾讯 Coding Plan (订阅)", base: "https://api.lkeap.cloud.tencent.com/coding/v3", model: "hunyuan-2.0-instruct", proto: "openai" },
+  { name: "MiniMax Coding Plan (订阅)", base: "https://api.minimaxi.com/anthropic/v1", model: "MiniMax-M2.5", proto: "anthropic" },
+  { name: "Kimi 开放平台 (按量)", base: "https://api.moonshot.cn/v1", model: "kimi-k3", proto: "openai" },
+  { name: "DeepSeek", base: "https://api.deepseek.com/v1", model: "deepseek-chat", proto: "openai" },
+  { name: "通义千问 (阿里)", base: "https://dashscope.aliyuncs.com/compatible-mode/v1", model: "qwen-plus", proto: "openai" },
+  { name: "智谱 GLM", base: "https://open.bigmodel.cn/api/paas/v4", model: "glm-4-flash", proto: "openai" },
+  { name: "硅基流动 SiliconFlow", base: "https://api.siliconflow.cn/v1", model: "Qwen/Qwen2.5-7B-Instruct", proto: "openai" },
+  { name: "火山方舟 (字节)", base: "https://ark.cn-beijing.volces.com/api/v3", model: "", proto: "openai" },
+  { name: "OpenAI", base: "https://api.openai.com/v1", model: "gpt-4o-mini", proto: "openai" },
+  { name: "OpenRouter", base: "https://openrouter.ai/api/v1", model: "", proto: "openai" },
+  { name: "Groq", base: "https://api.groq.com/openai/v1", model: "llama-3.3-70b-versatile", proto: "openai" },
+  { name: "Gemini (Google)", base: "https://generativelanguage.googleapis.com/v1beta/openai", model: "gemini-2.0-flash", proto: "openai" },
+  { name: "Ollama (本地)", base: "http://127.0.0.1:11434/v1", model: "qwen2.5", proto: "openai" },
+  { name: "自定义", base: "", model: "", proto: "openai" },
 ];
 
 function helpIcon(tip) {
@@ -90,17 +95,19 @@ function buildPanel() {
   title.addEventListener("pointerup", () => { pdrag = null; });
 
   const llmBox = el("details", { class: "aie-card" }, [
-    el("summary", {}, ["LLM 设置 (OpenAI 兼容 API) ", helpIcon("给「AI 帮我选」用的轻量 LLM。选择服务商会自动填 base_url 和推荐模型;也可以点「连接」用你的 Key 实时拉取该账号可用的模型列表,再从下拉框选择。")]),
+    el("summary", {}, ["LLM 设置 (全局唯一配置入口) ", helpIcon("在这里配置一次,同时用于「AI 帮我选」和 opencode 代理。选择服务商自动填地址和推荐模型;订阅类(Coding Plan) Key 请选带「订阅」字样的预设。保存后自动同步给 opencode 并重启其服务。")]),
     el("select", { id: "aie-llm-preset", class: "aie-input",
       onchange: (e) => {
         const p = LLM_PRESETS[e.target.selectedIndex];
         if (p && p.base) {
           document.getElementById("aie-llm-base").value = p.base;
+          document.getElementById("aie-llm-proto").value = p.proto || "openai";
           const m = document.getElementById("aie-llm-model");
           if (p.model) m.value = p.model;
         }
       } },
       LLM_PRESETS.map(p => el("option", {}, p.name))),
+    el("input", { id: "aie-llm-proto", type: "hidden", value: "openai" }),
     el("input", { id: "aie-llm-base", class: "aie-input", placeholder: "base_url 如 https://api.moonshot.cn/v1" }),
     el("div", { style: "display:flex;gap:4px;align-items:center;" }, [
       el("input", { id: "aie-llm-key", class: "aie-input", placeholder: "api_key", type: "password", style: "flex:1;margin:4px 0;" }),
@@ -314,6 +321,11 @@ function openDirPicker(targetInput) {
 }
 
 async function llmConnect() {
+  const proto = document.getElementById("aie-llm-proto").value;
+  if (proto === "anthropic") {
+    logmsg("订阅类 (Anthropic 协议) 不支持在线拉取模型列表,直接用预设模型名,保存设置即可");
+    return;
+  }
   const base = document.getElementById("aie-llm-base").value.trim().replace(/\/$/, "");
   const key = document.getElementById("aie-llm-key").value.trim();
   if (!base || !key) { logmsg("请先填 base_url 和 api_key 再连接"); return; }
@@ -350,6 +362,7 @@ async function loadLLMSettings() {
     document.getElementById("aie-llm-base").value = cfg.llm.base_url || "";
     document.getElementById("aie-llm-key").value = cfg.llm.api_key || "";
     document.getElementById("aie-llm-model").value = cfg.llm.model || "";
+    document.getElementById("aie-llm-proto").value = cfg.llm.proto || "openai";
     const idx = LLM_PRESETS.findIndex(p => p.base && p.base === cfg.llm.base_url);
     document.getElementById("aie-llm-preset").selectedIndex = idx >= 0 ? idx : LLM_PRESETS.length - 1;
   }
@@ -361,9 +374,15 @@ async function saveLLMSettings() {
       base_url: document.getElementById("aie-llm-base").value.trim(),
       api_key: document.getElementById("aie-llm-key").value.trim(),
       model: document.getElementById("aie-llm-model").value.trim(),
+      proto: document.getElementById("aie-llm-proto").value || "openai",
     },
   });
-  logmsg("LLM 设置已保存 (opencode 重启服务后将自动使用此 API 作为默认模型)");
+  logmsg("LLM 设置已保存,正在同步到 opencode 并重启服务...");
+  await post("/opencode/stop", {});
+  const r = await post("/opencode/start", {});
+  logmsg(r.ok ? "opencode 已用该 API 重启,默认模型 = aie-custom/" + document.getElementById("aie-llm-model").value
+              : "opencode 未启动(" + (r.error || "") + "),设置将在下次启动时生效");
+  ocRefreshStatus();
 }
 
 function selectedSources() {
@@ -614,8 +633,8 @@ async function onboardingReminder() {
     const hints = {
       install: "未检测到 opencode。请在面板/节点中选择安装目录并确认,将自动下载官方独立二进制(无需 Node.js)",
       start: "opencode 已安装但未运行。请在面板/节点中点「启动」",
-      auth: "opencode 未配置 LLM API Key。请在面板/节点中完成配置",
-      model: "opencode 未选择默认模型。请在面板/节点中选择模型",
+      auth: "opencode 未配置 LLM。请直接在「LLM 设置」里选服务商填 Key 保存,会自动同步",
+      model: "opencode 未选择默认模型。请在「LLM 设置」里填模型名并保存",
     };
     openPanel(document.getElementById("aie-panel"));
     logmsg("⚠ AI 代理未完成配置: " + (hints[st.stage] || st.stage));
@@ -698,63 +717,17 @@ async function buildOcSetup(container) {
     ]));
     return;
   }
-  line.textContent = st.stage === "auth" ? "● 需要配置 LLM provider 的 API Key" : "● 需要选择默认模型";
-  const prov = await api("/opencode/providers");
-  const list = (prov.providers || []).slice().sort((a, b) =>
-    (b.connected - a.connected) || ((b.id.includes("coding")) - (a.id.includes("coding"))));
-  const sel = el("select", { class: "aie-input" });
-  for (const p of list) {
-    const tag = p.id.includes("coding") ? " [订阅/Coding Plan]" : "";
-    sel.append(el("option", { value: p.id }, `${p.name}${tag}${p.connected ? " ✔" : ""}`));
-  }
-  container.append(el("div", { style: "color:#777;font-size:11px;margin-top:4px;" },
-    "提示: 订阅类 Key (Kimi For Coding / GLM Coding Plan 等) 必须选带 [订阅/Coding Plan] 标记的 provider,选普通平台会 401"));
-  const key = el("input", { type: "password", placeholder: "api_key", class: "aie-input", style: "flex:1;margin:4px 0;" });
-  const connMsg = el("span", { style: "color:#999;font-size:11px;" });
-  const modelSel = el("select", { class: "aie-input", style: "display:none;" });
-  const saveBtn = el("button", { class: "aie-btn aie-btn-primary", style: "margin:4px 0;display:none;", onclick: async () => {
-    const r = await post("/opencode/auth", { provider: sel.value, api_key: key.value.trim(), model: modelSel.value });
-    logmsg(r.ok ? "opencode 配置已保存" : "配置失败: " + (r.error || r.response || ""));
+  line.textContent = "● 未配置模型 — 请在上方「LLM 设置」选择服务商、填 Key、保存,将自动同步到这里";
+  const syncBtn = el("button", { class: "aie-btn aie-btn-primary", style: "margin:4px 0;", onclick: async () => {
+    syncBtn.disabled = true;
+    logmsg("从 LLM 设置同步并重启 opencode...");
+    await post("/opencode/stop", {});
+    const r = await post("/opencode/start", {});
+    logmsg(r.ok ? "opencode 已用 LLM 设置重启" : "启动失败: " + (r.error || "请先在 LLM 设置中填好 API"));
     buildOcSetup(container);
     ocRefreshStatus();
-  } }, "保存配置");
-  const connectBtn = el("button", { class: "aie-btn", onclick: async () => {
-    const pid = sel.value, k = key.value.trim();
-    if (!k) { connMsg.textContent = "请先输入 api_key"; return; }
-    connMsg.textContent = "连接中...";
-    const r = await post("/opencode/auth", { provider: pid, api_key: k });
-    if (!r.ok) { connMsg.textContent = "连接失败: " + (r.error || r.response || ""); return; }
-    const prov2 = await api("/opencode/providers");
-    const p = (prov2.providers || []).find(x => x.id === pid);
-    if (!p || !p.connected) { connMsg.textContent = "Key 已保存但 provider 未连接,请检查 Key 是否属于该服务商"; return; }
-    showModels(p);
-  } }, "连接");
-  const showModels = (p) => {
-    const models = p.models || [];
-    modelSel.innerHTML = "";
-    for (const m of models) modelSel.append(el("option", { value: m }, m));
-    if (models.length) {
-      modelSel.style.display = "";
-      saveBtn.style.display = "";
-      connMsg.textContent = `${p.name} 已连接,${models.length} 个模型可选,请选择后保存`;
-    } else {
-      connMsg.textContent = "已连接,但该 provider 未返回模型列表";
-    }
-  };
-  const onProviderChange = () => {
-    const p = list.find(x => x.id === sel.value);
-    if (p && p.connected) {
-      connMsg.textContent = "该 provider 已连接,无需重复输入 Key";
-      showModels(p);
-    } else {
-      modelSel.style.display = "none";
-      saveBtn.style.display = "none";
-      connMsg.textContent = "";
-    }
-  };
-  sel.addEventListener("change", onProviderChange);
-  onProviderChange();
-  container.append(sel, el("div", { style: "display:flex;gap:4px;align-items:center;" }, [key, connectBtn]), connMsg, modelSel, saveBtn);
+  } }, "从 LLM 设置同步并重启服务");
+  container.append(syncBtn);
 }
 
 function attachOcChat(container) {

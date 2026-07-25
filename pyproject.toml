@@ -1,0 +1,14 @@
+[project]
+name = "comfyui-ai-executor"
+description = "Search workflows online (Civitai/ComfyWorkflows/OpenArt/GitHub), auto-install missing nodes & models, and run them - an AI executor panel for ComfyUI"
+version = "0.1.0"
+license = { text = "MIT" }
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/CHANGE_ME/ComfyUI-AI-Executor"
+
+[tool.comfy]
+PublisherId = ""
+DisplayName = "ComfyUI AI Executor"
+Icon = ""

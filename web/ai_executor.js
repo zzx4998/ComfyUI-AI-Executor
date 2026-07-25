@@ -322,16 +322,20 @@ function openDirPicker(targetInput) {
 
 async function llmConnect() {
   const proto = document.getElementById("aie-llm-proto").value;
-  if (proto === "anthropic") {
-    logmsg("订阅类 (Anthropic 协议) 不支持在线拉取模型列表,直接用预设模型名,保存设置即可");
-    return;
-  }
   const base = document.getElementById("aie-llm-base").value.trim().replace(/\/$/, "");
   const key = document.getElementById("aie-llm-key").value.trim();
   if (!base || !key) { logmsg("请先填 base_url 和 api_key 再连接"); return; }
   logmsg("连接 " + base + " ...");
   try {
-    const resp = await fetch(base + "/models", { headers: { "Authorization": "Bearer " + key } });
+    let resp;
+    if (proto === "anthropic") {
+      resp = await fetch(base + "/models", { headers: { "x-api-key": key, "anthropic-version": "2023-06-01" } });
+      if (resp.status === 401 || resp.status === 403) {
+        resp = await fetch(base + "/models", { headers: { "Authorization": "Bearer " + key, "anthropic-version": "2023-06-01" } });
+      }
+    } else {
+      resp = await fetch(base + "/models", { headers: { "Authorization": "Bearer " + key } });
+    }
     if (!resp.ok) {
       let detail = "";
       try { detail = JSON.stringify(await resp.json()).slice(0, 300); } catch { detail = await resp.text().catch(() => ""); }

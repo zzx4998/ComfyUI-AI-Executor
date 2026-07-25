@@ -122,30 +122,53 @@ function buildPanel() {
   root.append(title, llmBox, reqBox, srcRow, list, detail, log);
   document.body.append(root);
 
+  const styleTag = el("style", {}, `
+    #aie-fab {
+      position: fixed; z-index: 9999; padding: 0 16px; height: 38px;
+      border: none; border-radius: 19px; cursor: grab; touch-action: none;
+      font: 600 13px/38px "Segoe UI", sans-serif; letter-spacing: .5px; color: #fff;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      box-shadow: 0 3px 12px rgba(102,126,234,.45), inset 0 1px 0 rgba(255,255,255,.25);
+      transition: transform .15s ease, box-shadow .15s ease, filter .15s ease;
+      user-select: none; white-space: nowrap;
+    }
+    #aie-fab:hover {
+      transform: translateY(-2px) scale(1.05);
+      filter: brightness(1.15);
+      box-shadow: 0 6px 20px rgba(102,126,234,.6), inset 0 1px 0 rgba(255,255,255,.3);
+    }
+    #aie-fab:active { transform: scale(.97); filter: brightness(.95); }
+    #aie-fab.dragging { cursor: grabbing; transition: none; transform: scale(1.03); filter: brightness(1.05); }
+  `);
+  document.head.append(styleTag);
   const savedPos = JSON.parse(localStorage.getItem("aie-fab-pos") || "null");
-  const fab = el("button", { style: `
-    position:fixed;${savedPos ? `left:${savedPos.x}px;top:${savedPos.y}px;` : "bottom:80px;right:10px;"}
-    z-index:9999;border-radius:50%;width:44px;height:44px;
-    background:#5a4fcf;color:#fff;border:none;cursor:grab;font-size:18px;touch-action:none;` }, "AI");
+  const fab = el("button", { id: "aie-fab" }, "✦ AI Executor");
+  if (savedPos) {
+    fab.style.left = savedPos.x + "px";
+    fab.style.top = savedPos.y + "px";
+  } else {
+    fab.style.bottom = "80px";
+    fab.style.right = "10px";
+  }
   let drag = null;
   fab.addEventListener("pointerdown", (e) => {
     drag = { sx: e.clientX, sy: e.clientY, ox: fab.offsetLeft, oy: fab.offsetTop, moved: false };
     fab.setPointerCapture(e.pointerId);
-    fab.style.cursor = "grabbing";
   });
   fab.addEventListener("pointermove", (e) => {
     if (!drag) return;
     const dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
     if (Math.abs(dx) + Math.abs(dy) > 4) drag.moved = true;
     if (drag.moved) {
-      fab.style.left = Math.max(0, Math.min(window.innerWidth - 44, drag.ox + dx)) + "px";
-      fab.style.top = Math.max(0, Math.min(window.innerHeight - 44, drag.oy + dy)) + "px";
+      fab.classList.add("dragging");
+      fab.style.left = Math.max(0, Math.min(window.innerWidth - fab.offsetWidth, drag.ox + dx)) + "px";
+      fab.style.top = Math.max(0, Math.min(window.innerHeight - fab.offsetHeight, drag.oy + dy)) + "px";
       fab.style.right = "auto";
       fab.style.bottom = "auto";
     }
   });
   fab.addEventListener("pointerup", (e) => {
-    fab.style.cursor = "grab";
+    fab.classList.remove("dragging");
     if (!drag) return;
     if (drag.moved) {
       localStorage.setItem("aie-fab-pos", JSON.stringify({ x: fab.offsetLeft, y: fab.offsetTop }));

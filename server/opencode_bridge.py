@@ -43,6 +43,15 @@ def find_exe():
     if configured and os.path.exists(configured):
         _state["exe"] = configured
         return configured
+    bin_dir = os.path.join(PLUGIN_DIR, "bin")
+    for name in ("opencode.exe", "opencode"):
+        p = os.path.join(bin_dir, name)
+        if os.path.exists(p):
+            _state["exe"] = p
+            cfg = _read_config()
+            cfg["opencode_exe"] = p
+            _write_config(cfg)
+            return p
     for name in ("opencode", "opencode.exe"):
         p = shutil.which(name)
         if p:

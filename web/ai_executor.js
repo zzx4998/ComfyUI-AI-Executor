@@ -26,6 +26,13 @@ const LLM_PRESETS = [
   { name: "自定义", base: "", model: "" },
 ];
 
+function helpIcon(tip) {
+  const s = el("span", { class: "aie-help", "data-tip": tip }, "?");
+  s.addEventListener("pointerdown", (e) => { e.stopPropagation(); e.preventDefault(); });
+  s.addEventListener("click", (e) => { e.stopPropagation(); e.preventDefault(); });
+  return s;
+}
+
 function el(tag, attrs = {}, children = []) {
   const e = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
@@ -82,9 +89,9 @@ function buildPanel() {
   });
   title.addEventListener("pointerup", () => { pdrag = null; });
 
-  const llmBox = el("details", { style: "margin-bottom:8px;" }, [
-    el("summary", {}, "LLM 设置 (OpenAI 兼容 API)"),
-    el("select", { id: "aie-llm-preset", style: "width:100%;margin:4px 0;background:#111;color:#ddd;border:1px solid #444;padding:4px;",
+  const llmBox = el("details", { class: "aie-card" }, [
+    el("summary", {}, ["LLM 设置 (OpenAI 兼容 API) ", helpIcon("给「AI 帮我选」用的轻量 LLM。选择服务商会自动填 base_url 和推荐模型;也可以点「连接」用你的 Key 实时拉取该账号可用的模型列表,再从下拉框选择。")]),
+    el("select", { id: "aie-llm-preset", class: "aie-input",
       onchange: (e) => {
         const p = LLM_PRESETS[e.target.selectedIndex];
         if (p && p.base) {
@@ -94,46 +101,53 @@ function buildPanel() {
         }
       } },
       LLM_PRESETS.map(p => el("option", {}, p.name))),
-    el("input", { id: "aie-llm-base", placeholder: "base_url 如 https://api.moonshot.cn/v1", style: "width:100%;margin:4px 0;background:#111;color:#ddd;border:1px solid #444;padding:4px;" }),
-    el("input", { id: "aie-llm-key", placeholder: "api_key", type: "password", style: "width:100%;margin:4px 0;background:#111;color:#ddd;border:1px solid #444;padding:4px;" }),
-    el("input", { id: "aie-llm-model", placeholder: "model 如 kimi-k2 / deepseek-chat", style: "width:100%;margin:4px 0;background:#111;color:#ddd;border:1px solid #444;padding:4px;" }),
-    el("button", { style: "margin:4px 0;", onclick: saveLLMSettings }, "保存设置"),
+    el("input", { id: "aie-llm-base", class: "aie-input", placeholder: "base_url 如 https://api.moonshot.cn/v1" }),
+    el("div", { style: "display:flex;gap:4px;align-items:center;" }, [
+      el("input", { id: "aie-llm-key", class: "aie-input", placeholder: "api_key", type: "password", style: "flex:1;margin:4px 0;" }),
+      el("button", { class: "aie-btn", onclick: llmConnect }, "连接"),
+    ]),
+    el("input", { id: "aie-llm-model", class: "aie-input", placeholder: "model 如 kimi-k2 / deepseek-chat", list: "aie-llm-models" }),
+    el("datalist", { id: "aie-llm-models" }),
+    el("button", { class: "aie-btn", style: "margin:4px 0;", onclick: saveLLMSettings }, "保存设置"),
   ]);
 
-  const reqBox = el("div", { style: "margin-bottom:8px;" }, [
-    el("textarea", { id: "aie-req", placeholder: "用自然语言描述需求,例如: 把这张照片变成吉卜力风格并放大到4K", style: "width:100%;height:48px;background:#111;color:#ddd;border:1px solid #444;padding:4px;" }),
+  const reqBox = el("div", { class: "aie-card" }, [
+    el("div", { style: "font-weight:600;color:#cfd2e0;" }, ["需求 ", helpIcon("用自然语言描述你要做的事,中文即可。点「搜索工作流」手动挑;点「AI 帮我选」让上面的 LLM 挑;或在下方「AI 代理」区派单给 opencode 全自动执行。")]),
+    el("textarea", { id: "aie-req", class: "aie-input", placeholder: "例如: 把这张照片变成吉卜力风格并放大到4K", style: "height:48px;" }),
     el("div", { style: "display:flex;gap:4px;margin-top:4px;" }, [
-      el("button", { onclick: () => doSearch() }, "搜索工作流"),
-      el("button", { onclick: () => aiPick() }, "AI 帮我选"),
+      el("button", { class: "aie-btn", onclick: () => doSearch() }, "搜索工作流"),
+      el("button", { class: "aie-btn", onclick: () => aiPick() }, "AI 帮我选"),
     ]),
   ]);
 
-  const srcRow = el("div", { style: "margin-bottom:6px;display:flex;gap:6px;flex-wrap:wrap;" },
-    ["local", "civitai", "comfyworkflows", "openart", "github"].map(s =>
+  const srcRow = el("div", { class: "aie-card", style: "display:flex;gap:8px;flex-wrap:wrap;align-items:center;" },
+    [["来源 ", helpIcon("勾选搜索哪些站点: local=本地工作流库; civitai/comfyworkflows/openart/github=在线工作流站。在线站点建议挂代理。")],
+     ...["local", "civitai", "comfyworkflows", "openart", "github"].map(s =>
       el("label", { style: "cursor:pointer;" }, [
         el("input", { type: "checkbox", class: "aie-src", value: s, checked: s === "local" || s === "civitai" ? "checked" : null }), " " + s,
       ])
-    ));
+    )]);
 
-  const ocBox = el("details", { style: "margin-bottom:8px;" }, [
-    el("summary", {}, "AI 代理 (opencode)"),
+  const ocBox = el("details", { class: "aie-card" }, [
+    el("summary", {}, ["AI 代理 (opencode) ", helpIcon("全自动模式: opencode 代理读取内置规则手册,自主完成 需求理解→翻译扩充检索→筛选工作流→装缺失节点/模型→参数注入→运行→失败重试。首次使用按下方向导完成安装和配置。也可以把「AI Executor Agent」节点拖到画布里用。")]),
     el("div", { style: "display:flex;gap:4px;align-items:center;margin:4px 0;" }, [
       el("span", { id: "aie-oc-dot", style: "width:8px;height:8px;border-radius:50%;background:#666;display:inline-block;" }),
       el("span", { id: "aie-oc-status", style: "color:#999;flex:1;" }, "未检测"),
-      el("button", { onclick: ocStart }, "启动"),
-      el("button", { onclick: ocStop }, "停止"),
+      el("button", { class: "aie-btn", onclick: ocStart }, "启动"),
+      el("button", { class: "aie-btn", onclick: ocStop }, "停止"),
     ]),
-    el("button", { style: "width:100%;margin:2px 0;background:#2d6a4f;color:#fff;border:none;padding:6px;border-radius:4px;cursor:pointer;",
+    el("button", { class: "aie-btn aie-btn-primary", style: "width:100%;margin:2px 0;padding:6px;",
       onclick: ocDispatch }, "▶ 派单给 AI 代理执行需求"),
-    el("button", { style: "width:100%;margin:2px 0;", onclick: ocAbort }, "中止当前任务"),
+    el("button", { class: "aie-btn", style: "width:100%;margin:2px 0;", onclick: ocAbort }, "中止当前任务"),
     (() => { const d = el("div"); buildOcSetup(d); return d; })(),
   ]);
 
+  const listHead = el("div", { style: "font-weight:600;color:#cfd2e0;margin:2px 0;" }, ["搜索结果 ", helpIcon("点击卡片拉取工作流 JSON 并自动检查依赖。卡片显示: 来源/标题/发布日期/底模/作者/样例图。")]);
   const list = el("div", { id: "aie-results" });
   const detail = el("div", { id: "aie-detail", style: "margin-top:8px;" });
-  const log = el("pre", { id: "aie-log", style: "background:#111;padding:6px;max-height:160px;overflow:auto;white-space:pre-wrap;margin-top:8px;" });
+  const log = el("pre", { id: "aie-log", style: "background:#14141d;border:1px solid #2e2e3a;border-radius:6px;padding:6px;max-height:160px;overflow:auto;white-space:pre-wrap;margin-top:8px;" });
 
-  root.append(title, llmBox, reqBox, srcRow, ocBox, list, detail, log);
+  root.append(title, llmBox, reqBox, srcRow, ocBox, listHead, list, detail, log);
   document.body.append(root);
 
   const styleTag = el("style", {}, `
@@ -153,6 +167,26 @@ function buildPanel() {
     }
     #aie-fab:active { transform: scale(.97); filter: brightness(.95); }
     #aie-fab.dragging { cursor: grabbing; transition: none; transform: scale(1.03); filter: brightness(1.05); }
+    #aie-panel { background: #1b1b26; border: 1px solid #3d3d55; border-radius: 10px; }
+    #aie-panel .aie-card { background: #22222f; border: 1px solid #34343f; border-radius: 8px; padding: 8px; margin-bottom: 8px; }
+    #aie-panel summary { cursor: pointer; font-weight: 600; padding: 2px 0; color: #cfd2e0; }
+    #aie-panel summary:hover { color: #fff; }
+    .aie-input { width: 100%; margin: 4px 0; background: #14141d; color: #ddd; border: 1px solid #3d3d4d;
+      padding: 6px 8px; border-radius: 6px; font-size: 12px; box-sizing: border-box; transition: border-color .15s; }
+    .aie-input:focus { border-color: #667eea; outline: none; }
+    .aie-btn { background: #2b2b3c; color: #ccc; border: 1px solid #46465a; padding: 5px 12px;
+      border-radius: 6px; cursor: pointer; font-size: 12px; transition: all .15s; }
+    .aie-btn:hover { background: #383850; border-color: #667eea; color: #fff; transform: translateY(-1px); }
+    .aie-btn-primary { background: linear-gradient(135deg, #667eea, #764ba2); color: #fff; border: none; }
+    .aie-btn-primary:hover { filter: brightness(1.2); transform: translateY(-1px); }
+    .aie-help { display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px;
+      border-radius: 50%; background: #3a3a4e; color: #8fa3c8; font-size: 10px; font-weight: 700;
+      margin-left: 6px; cursor: help; position: relative; vertical-align: middle; flex: none; }
+    .aie-help:hover { background: #667eea; color: #fff; }
+    .aie-help:hover::after { content: attr(data-tip); position: absolute; left: 22px; top: -6px;
+      background: rgba(10,10,18,.97); border: 1px solid #555; padding: 8px 10px; border-radius: 8px;
+      width: 240px; white-space: pre-wrap; z-index: 10001; color: #ddd; font-size: 11px; font-weight: 400;
+      line-height: 1.6; box-shadow: 0 4px 16px #000a; pointer-events: none; }
   `);
   document.head.append(styleTag);
   const savedPos = JSON.parse(localStorage.getItem("aie-fab-pos") || "null");
@@ -187,13 +221,52 @@ function buildPanel() {
     if (drag.moved) {
       localStorage.setItem("aie-fab-pos", JSON.stringify({ x: fab.offsetLeft, y: fab.offsetTop }));
     } else {
-      root.style.display = root.style.display === "none" ? "block" : "none";
+      togglePanel(root, fab);
     }
     drag = null;
   });
   document.body.append(fab);
 
   loadLLMSettings();
+}
+
+function togglePanel(root, fab) {
+  if (root.style.display !== "none") { root.style.display = "none"; return; }
+  openPanel(root, fab);
+}
+
+function openPanel(root, fab) {
+  root.style.display = "block";
+  const r = (fab || document.getElementById("aie-fab")).getBoundingClientRect();
+  const pw = root.offsetWidth || 420;
+  const ph = root.offsetHeight || 500;
+  let x = Math.max(10, Math.min(r.right - pw, window.innerWidth - pw - 10));
+  let y = r.bottom + 10;
+  if (y + ph > window.innerHeight - 10) y = Math.max(10, r.top - ph - 10);
+  root.style.left = x + "px";
+  root.style.top = y + "px";
+  root.style.right = "auto";
+}
+
+async function llmConnect() {
+  const base = document.getElementById("aie-llm-base").value.trim().replace(/\/$/, "");
+  const key = document.getElementById("aie-llm-key").value.trim();
+  if (!base || !key) { logmsg("请先填 base_url 和 api_key 再连接"); return; }
+  logmsg("连接 " + base + " ...");
+  try {
+    const resp = await fetch(base + "/models", { headers: { "Authorization": "Bearer " + key } });
+    if (!resp.ok) { logmsg("连接失败: HTTP " + resp.status); return; }
+    const data = await resp.json();
+    const ids = (data.data || []).map(m => m.id).filter(Boolean).sort();
+    if (!ids.length) { logmsg("连接成功但模型列表为空"); return; }
+    const dl = document.getElementById("aie-llm-models");
+    dl.innerHTML = "";
+    for (const id of ids) dl.append(el("option", { value: id }));
+    document.getElementById("aie-llm-model").value = ids[0];
+    logmsg(`连接成功,拉取到 ${ids.length} 个模型,已在模型栏提供下拉选择`);
+  } catch (e) {
+    logmsg("连接失败: " + e);
+  }
 }
 
 function logmsg(m) {
@@ -474,7 +547,7 @@ async function onboardingReminder() {
       auth: "opencode 未配置 LLM API Key。请在面板/节点中完成配置",
       model: "opencode 未选择默认模型。请在面板/节点中选择模型",
     };
-    document.getElementById("aie-panel").style.display = "block";
+    openPanel(document.getElementById("aie-panel"));
     logmsg("⚠ AI 代理未完成配置: " + (hints[st.stage] || st.stage));
   } catch { /* ignore */ }
 }
@@ -518,23 +591,38 @@ async function buildOcSetup(container) {
   line.textContent = st.stage === "auth" ? "● 需要配置 LLM provider 的 API Key" : "● 需要选择默认模型";
   const prov = await api("/opencode/providers");
   const list = prov.providers || [];
-  const sel = el("select", { style: "width:100%;margin:4px 0;background:#111;color:#ddd;border:1px solid #444;padding:4px;" });
+  const sel = el("select", { class: "aie-input" });
   for (const p of list) sel.append(el("option", { value: p.id }, `${p.name}${p.connected ? " ✔" : ""}`));
-  const modelSel = el("select", { style: "width:100%;margin:4px 0;background:#111;color:#ddd;border:1px solid #444;padding:4px;" });
-  const fillModels = () => {
-    modelSel.innerHTML = "";
-    const p = list.find(x => x.id === sel.value);
-    for (const m of p?.models || []) modelSel.append(el("option", { value: m }, m));
-  };
-  sel.addEventListener("change", fillModels);
-  fillModels();
-  const key = el("input", { type: "password", placeholder: "api_key", style: "width:100%;margin:4px 0;background:#111;color:#ddd;border:1px solid #444;padding:4px;" });
-  container.append(sel, modelSel, key, el("button", { style: "margin:4px 0;", onclick: async () => {
+  const key = el("input", { type: "password", placeholder: "api_key", class: "aie-input", style: "flex:1;margin:4px 0;" });
+  const connMsg = el("span", { style: "color:#999;font-size:11px;" });
+  const modelSel = el("select", { class: "aie-input", style: "display:none;" });
+  const saveBtn = el("button", { class: "aie-btn aie-btn-primary", style: "margin:4px 0;display:none;", onclick: async () => {
     const r = await post("/opencode/auth", { provider: sel.value, api_key: key.value.trim(), model: modelSel.value });
     logmsg(r.ok ? "opencode 配置已保存" : "配置失败: " + (r.error || r.response || ""));
     buildOcSetup(container);
     ocRefreshStatus();
-  } }, "保存配置"));
+  } }, "保存配置");
+  const connectBtn = el("button", { class: "aie-btn", onclick: async () => {
+    const pid = sel.value, k = key.value.trim();
+    if (!k) { connMsg.textContent = "请先输入 api_key"; return; }
+    connMsg.textContent = "连接中...";
+    const r = await post("/opencode/auth", { provider: pid, api_key: k });
+    if (!r.ok) { connMsg.textContent = "连接失败: " + (r.error || r.response || ""); return; }
+    const prov2 = await api("/opencode/providers");
+    const p = (prov2.providers || []).find(x => x.id === pid);
+    if (!p || !p.connected) { connMsg.textContent = "Key 已保存但 provider 未连接,请检查 Key"; return; }
+    const models = p.models || [];
+    modelSel.innerHTML = "";
+    for (const m of models) modelSel.append(el("option", { value: m }, m));
+    if (models.length) {
+      modelSel.style.display = "";
+      saveBtn.style.display = "";
+      connMsg.textContent = `连接成功,${models.length} 个模型可选,请选择后保存`;
+    } else {
+      connMsg.textContent = "连接成功,但该 provider 未返回模型列表";
+    }
+  } }, "连接");
+  container.append(sel, el("div", { style: "display:flex;gap:4px;align-items:center;" }, [key, connectBtn]), connMsg, modelSel, saveBtn);
 }
 
 function attachOcChat(container) {

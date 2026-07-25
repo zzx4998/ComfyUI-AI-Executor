@@ -48,8 +48,10 @@ async def ping(request):
 async def get_settings(request):
     cfg = _load_config()
     safe = dict(cfg)
-    if safe.get("llm", {}).get("api_key"):
-        safe["llm"]["api_key"] = "***"
+    llm = dict(safe.get("llm") or {})
+    llm["has_key"] = bool(llm.get("api_key"))
+    llm.pop("api_key", None)
+    safe["llm"] = llm
     return web.json_response(safe)
 
 
@@ -59,7 +61,7 @@ async def set_settings(request):
     cfg = _load_config()
     if "llm" in body:
         llm = body["llm"] or {}
-        if llm.get("api_key") == "***":
+        if not llm.get("api_key") or llm.get("api_key") == "***":
             llm["api_key"] = (cfg.get("llm") or {}).get("api_key", "")
         cfg["llm"] = llm
     for k in ("hf_mirror", "github_token", "github_repos", "proxy", "opencode_exe"):
@@ -295,6 +297,8 @@ async def llm_models(request):
     base = (body.get("base") or "").strip().rstrip("/")
     key = (body.get("api_key") or "").strip()
     proto = (body.get("proto") or "openai").strip()
+    if not key:
+        key = ((_load_config().get("llm") or {}).get("api_key") or "").strip()
     if not base or not key:
         return web.json_response({"ok": False, "error": "base and api_key required"}, status=400)
     headers = {"Authorization": f"Bearer {key}"}

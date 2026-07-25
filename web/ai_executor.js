@@ -324,7 +324,8 @@ async function llmConnect() {
   const proto = document.getElementById("aie-llm-proto").value;
   const base = document.getElementById("aie-llm-base").value.trim().replace(/\/$/, "");
   const key = document.getElementById("aie-llm-key").value.trim();
-  if (!base || !key) { logmsg("请先填 base_url 和 api_key 再连接"); return; }
+  if (!base) { logmsg("请先填 base_url"); return; }
+  if (!key) logmsg("Key 栏为空,将使用已保存的 Key 连接");
   logmsg("连接 " + base + " ...");
   try {
     const r = await post("/llm/models", { base, api_key: key, proto });
@@ -350,9 +351,11 @@ async function loadLLMSettings() {
   const cfg = await api("/settings");
   if (cfg.llm) {
     document.getElementById("aie-llm-base").value = cfg.llm.base_url || "";
-    document.getElementById("aie-llm-key").value = cfg.llm.api_key || "";
     document.getElementById("aie-llm-model").value = cfg.llm.model || "";
     document.getElementById("aie-llm-proto").value = cfg.llm.proto || "openai";
+    const keyInput = document.getElementById("aie-llm-key");
+    keyInput.value = "";
+    keyInput.placeholder = cfg.llm.has_key ? "已保存 Key (留空保持不变,输入新 Key 则替换)" : "api_key";
     const idx = LLM_PRESETS.findIndex(p => p.base && p.base === cfg.llm.base_url);
     document.getElementById("aie-llm-preset").selectedIndex = idx >= 0 ? idx : LLM_PRESETS.length - 1;
   }

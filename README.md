@@ -1,4 +1,4 @@
-# ComfyUI AI Executor
+﻿# ComfyUI AI Executor
 
 ComfyUI 插件：从提需求到出图/出视频的一站式 AI 执行者。
 
@@ -14,7 +14,7 @@ ComfyUI 插件：从提需求到出图/出视频的一站式 AI 执行者。
 
 ```bash
 cd ComfyUI/custom_nodes
-git clone https://github.com/CHANGE_ME/ComfyUI-AI-Executor.git
+git clone https://github.com/zzx4998/ComfyUI-AI-Executor.git
 ```
 
 重启 ComfyUI，点击右下角 **AI** 悬浮按钮打开面板。

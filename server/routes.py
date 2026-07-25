@@ -61,7 +61,7 @@ async def set_settings(request):
         if llm.get("api_key") == "***":
             llm["api_key"] = (cfg.get("llm") or {}).get("api_key", "")
         cfg["llm"] = llm
-    for k in ("hf_mirror", "github_token", "github_repos"):
+    for k in ("hf_mirror", "github_token", "github_repos", "proxy", "opencode_exe"):
         if k in body:
             cfg[k] = body[k]
     _save_config(cfg)

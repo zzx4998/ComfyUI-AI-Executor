@@ -154,6 +154,24 @@ def guess_folder(filename, override=None):
     return "checkpoints"
 
 
+def _url_opener():
+    cfg = {}
+    config_path = os.path.join(PLUGIN_DIR, "config.json")
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+        except Exception:
+            pass
+    proxy = (cfg.get("proxy") or os.environ.get("HTTPS_PROXY")
+             or os.environ.get("https_proxy") or os.environ.get("HTTP_PROXY"))
+    if proxy:
+        if not proxy.startswith("http"):
+            proxy = "http://" + proxy
+        return urllib.request.build_opener(urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
+    return urllib.request.build_opener()
+
+
 def download_model_job(url=None, repo_id=None, filename=None, folder=None, use_mirror=True):
     label = filename or (url.rsplit("/", 1)[-1] if url else "model")
     job = new_job("model", label)
@@ -177,7 +195,7 @@ def download_model_job(url=None, repo_id=None, filename=None, folder=None, use_m
                 dl_url = dl_url.replace("https://huggingface.co", "https://hf-mirror.com")
             _log(job, f"downloading {dl_url} -> {dest}")
             req = urllib.request.Request(dl_url, headers={"User-Agent": "ComfyUI-AI-Executor"})
-            with urllib.request.urlopen(req, timeout=30) as resp, open(dest + ".part", "wb") as f:
+            with _url_opener().open(req, timeout=30) as resp, open(dest + ".part", "wb") as f:
                 total = int(resp.headers.get("Content-Length") or 0)
                 job["total"] = total
                 done = 0

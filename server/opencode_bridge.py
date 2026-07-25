@@ -63,6 +63,16 @@ def platform_asset_name():
     return "opencode-linux-arm64.zip" if "arm" in machine or "aarch64" in machine else "opencode-linux-x64.zip"
 
 
+def _url_opener():
+    proxy = (_read_config().get("proxy") or os.environ.get("HTTPS_PROXY")
+             or os.environ.get("https_proxy") or os.environ.get("HTTP_PROXY"))
+    if proxy:
+        if not proxy.startswith("http"):
+            proxy = "http://" + proxy
+        return urllib.request.build_opener(urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
+    return urllib.request.build_opener()
+
+
 def install_binary_job(dest_dir):
     job = installer.new_job("opencode_binary", dest_dir)
     job["status"] = "running"
@@ -71,8 +81,9 @@ def install_binary_job(dest_dir):
         try:
             os.makedirs(dest_dir, exist_ok=True)
             installer._log(job, "fetching latest release info...")
+            opener = _url_opener()
             req = urllib.request.Request(RELEASE_API, headers={"User-Agent": "ComfyUI-AI-Executor"})
-            with urllib.request.urlopen(req, timeout=30) as resp:
+            with opener.open(req, timeout=30) as resp:
                 release = json.load(resp)
             want = platform_asset_name()
             asset = next((a for a in release.get("assets", []) if a.get("name") == want), None)
@@ -85,7 +96,7 @@ def install_binary_job(dest_dir):
             zip_path = os.path.join(dest_dir, want)
             installer._log(job, f"downloading {tag} {want} ...")
             req = urllib.request.Request(url, headers={"User-Agent": "ComfyUI-AI-Executor"})
-            with urllib.request.urlopen(req, timeout=60) as resp, open(zip_path, "wb") as f:
+            with opener.open(req, timeout=60) as resp, open(zip_path, "wb") as f:
                 total = int(resp.headers.get("Content-Length") or 0)
                 job["total"] = total
                 done = 0

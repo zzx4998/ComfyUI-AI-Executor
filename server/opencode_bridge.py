@@ -193,6 +193,39 @@ async def health():
     return None
 
 
+TEMPLATE_PATH = os.path.join(WORKDIR, "opencode.template.json")
+RUNTIME_CONFIG_PATH = os.path.join(WORKDIR, "opencode.json")
+
+
+def build_runtime_config():
+    cfg = _read_config()
+    llm = cfg.get("llm") or {}
+    with open(TEMPLATE_PATH, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    env = {}
+    base = (llm.get("base_url") or "").strip()
+    key = (llm.get("api_key") or "").strip()
+    model = (llm.get("model") or "").strip()
+    if base and key:
+        providers = data.setdefault("provider", {})
+        custom = providers.setdefault("aie-custom", {
+            "npm": "@ai-sdk/openai-compatible",
+            "name": "自定义 LLM (来自插件 LLM 设置)",
+            "options": {"baseURL": "{env:AIE_LLM_BASE}", "apiKey": "{env:AIE_LLM_KEY}"},
+            "models": {},
+        })
+        if model:
+            custom.setdefault("models", {})[model] = {"name": model}
+            data["model"] = f"aie-custom/{model}"
+        env["AIE_LLM_BASE"] = base
+        env["AIE_LLM_KEY"] = key
+    else:
+        data.pop("provider", None)
+    with open(RUNTIME_CONFIG_PATH, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    return env
+
+
 def start(port=4097):
     if _state["proc"] and _state["proc"].poll() is None:
         return {"ok": True, "already": True, "port": _state["port"]}
@@ -200,15 +233,19 @@ def start(port=4097):
     if not exe:
         return {"ok": False, "error": "opencode executable not found on PATH. Install: npm i -g opencode-ai"}
     os.makedirs(WORKDIR, exist_ok=True)
+    extra_env = build_runtime_config()
     _state["port"] = port
     creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    env = dict(os.environ)
+    env.update(extra_env)
     _state["proc"] = subprocess.Popen(
         [exe, "serve", "--port", str(port), "--hostname", "127.0.0.1"],
         cwd=WORKDIR,
+        env=env,
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         creationflags=creationflags,
     )
-    return {"ok": True, "pid": _state["proc"].pid, "port": port}
+    return {"ok": True, "pid": _state["proc"].pid, "port": port, "custom_llm": bool(extra_env)}
 
 
 def stop():
@@ -382,9 +419,11 @@ async def onboarding():
             connected = [p for p in prov["providers"] if p["connected"]]
             detail["connected"] = [p["id"] for p in connected]
             detail["current_model"] = prov.get("current_model")
-            if not connected:
+            if prov.get("current_model"):
+                stage = "ready"
+            elif not connected:
                 stage = "auth"
-            elif not prov.get("current_model"):
+            else:
                 stage = "model"
     return {"stage": stage, "installed": installed, "running": running, "detail": detail}
 

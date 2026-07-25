@@ -320,7 +320,12 @@ async function llmConnect() {
   logmsg("连接 " + base + " ...");
   try {
     const resp = await fetch(base + "/models", { headers: { "Authorization": "Bearer " + key } });
-    if (!resp.ok) { logmsg("连接失败: HTTP " + resp.status); return; }
+    if (!resp.ok) {
+      let detail = "";
+      try { detail = JSON.stringify(await resp.json()).slice(0, 300); } catch { detail = await resp.text().catch(() => ""); }
+      logmsg(`连接失败: HTTP ${resp.status} ${detail}`);
+      return;
+    }
     const data = await resp.json();
     const ids = (data.data || []).map(m => m.id).filter(Boolean).sort();
     if (!ids.length) { logmsg("连接成功但模型列表为空"); return; }
@@ -358,7 +363,7 @@ async function saveLLMSettings() {
       model: document.getElementById("aie-llm-model").value.trim(),
     },
   });
-  logmsg("LLM 设置已保存");
+  logmsg("LLM 设置已保存 (opencode 重启服务后将自动使用此 API 作为默认模型)");
 }
 
 function selectedSources() {

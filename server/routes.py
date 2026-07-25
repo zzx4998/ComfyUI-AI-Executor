@@ -292,8 +292,27 @@ async def oc_onboarding(request):
 
 @routes.post("/ai_executor/opencode/install")
 async def oc_install(request):
-    job = opencode_bridge.install_opencode_job()
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+    dest = (body.get("dir") or "").strip()
+    if dest:
+        job = opencode_bridge.install_binary_job(dest)
+    else:
+        job = opencode_bridge.install_opencode_job()
     return web.json_response({"job_id": job["id"]})
+
+
+@routes.get("/ai_executor/opencode/browse")
+async def oc_browse(request):
+    return web.json_response(opencode_bridge.browse_dirs(request.query.get("path", "")))
+
+
+@routes.get("/ai_executor/opencode/default_install_dir")
+async def oc_default_dir(request):
+    return web.json_response({"dir": os.path.join(opencode_bridge.PLUGIN_DIR, "bin")})
 
 
 @routes.get("/ai_executor/opencode/providers")

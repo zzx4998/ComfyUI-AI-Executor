@@ -248,6 +248,43 @@ function openPanel(root, fab) {
   root.style.right = "auto";
 }
 
+function openDirPicker(targetInput) {
+  const overlay = el("div", { style: "position:fixed;inset:0;background:#000a;z-index:10002;display:flex;align-items:center;justify-content:center;" });
+  const box = el("div", { style: "width:420px;max-height:60vh;background:#1b1b26;border:1px solid #3d3d55;border-radius:10px;padding:12px;color:#ddd;font-size:12px;display:flex;flex-direction:column;" });
+  const pathLine = el("div", { style: "color:#9ab;margin-bottom:6px;word-break:break-all;" });
+  const listBox = el("div", { style: "flex:1;overflow-y:auto;background:#14141d;border:1px solid #2e2e3a;border-radius:6px;padding:4px;min-height:200px;" });
+  let current = "";
+  async function load(path) {
+    const r = await api("/opencode/browse?path=" + encodeURIComponent(path));
+    if (r.error) { pathLine.textContent = "无法访问: " + path; return; }
+    current = r.path;
+    pathLine.textContent = r.path || "选择磁盘";
+    listBox.innerHTML = "";
+    const up = el("div", { style: "padding:4px 6px;cursor:pointer;color:#7aa2f7;border-radius:4px;", onclick: () => load(r.parent ?? "") }, "⬅ .. (上一级)");
+    up.addEventListener("mouseenter", () => up.style.background = "#22222f");
+    up.addEventListener("mouseleave", () => up.style.background = "");
+    listBox.append(up);
+    for (const d of r.dirs || []) {
+      const item = el("div", { style: "padding:4px 6px;cursor:pointer;border-radius:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;", onclick: () => load(d) }, "📁 " + d);
+      item.addEventListener("mouseenter", () => item.style.background = "#22222f");
+      item.addEventListener("mouseleave", () => item.style.background = "");
+      listBox.append(item);
+    }
+  }
+  const btnRow = el("div", { style: "display:flex;gap:6px;justify-content:flex-end;margin-top:8px;" }, [
+    el("button", { class: "aie-btn", onclick: () => overlay.remove() }, "取消"),
+    el("button", { class: "aie-btn aie-btn-primary", onclick: () => {
+      if (current) targetInput.value = current;
+      overlay.remove();
+    } }, "选择此目录"),
+  ]);
+  box.append(pathLine, listBox, btnRow);
+  overlay.append(box);
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
+  document.body.append(overlay);
+  load(targetInput.value.trim() || "");
+}
+
 async function llmConnect() {
   const base = document.getElementById("aie-llm-base").value.trim().replace(/\/$/, "");
   const key = document.getElementById("aie-llm-key").value.trim();
@@ -542,7 +579,7 @@ async function onboardingReminder() {
     const st = await api("/opencode/onboarding");
     if (st.stage === "ready") return;
     const hints = {
-      install: "未检测到 opencode。请在面板/节点中点「一键安装 opencode」(需要 Node.js)",
+      install: "未检测到 opencode。请在面板/节点中选择安装目录并确认,将自动下载官方独立二进制(无需 Node.js)",
       start: "opencode 已安装但未运行。请在面板/节点中点「启动」",
       auth: "opencode 未配置 LLM API Key。请在面板/节点中完成配置",
       model: "opencode 未选择默认模型。请在面板/节点中选择模型",
@@ -562,25 +599,49 @@ async function buildOcSetup(container) {
     return;
   }
   if (st.stage === "install") {
-    if (!st.detail.npm) {
-      line.textContent = "✘ 未检测到 Node.js/npm,请先安装 Node.js: https://nodejs.org";
-      return;
-    }
-    line.textContent = "✘ 未安装 opencode";
-    container.append(el("button", { style: "margin:4px 0;", onclick: async (e) => {
-      e.target.disabled = true;
-      logmsg("安装 opencode-ai 中...");
-      const r = await post("/opencode/install", {});
+    line.textContent = "✘ 未安装 opencode — 选择安装目录后自动下载官方独立二进制(无需 Node.js)";
+    const def = await api("/opencode/default_install_dir");
+    const dirInput = el("input", { class: "aie-input", value: def.dir || "", style: "flex:1;margin:4px 0;" });
+    const installBtn = el("button", { class: "aie-btn aie-btn-primary", style: "margin:4px 0;", onclick: async () => {
+      const dest = dirInput.value.trim();
+      if (!dest) return;
+      installBtn.disabled = true;
+      installBtn.textContent = "安装中...";
+      logmsg("下载安装 opencode 到 " + dest + " ...");
+      const r = await post("/opencode/install", { dir: dest });
       const t = setInterval(async () => {
         const j = await api(`/jobs/${r.job_id}`);
         if (j.status === "done" || j.status === "failed") {
           clearInterval(t);
-          logmsg(j.status === "done" ? "opencode 安装完成" : "安装失败: " + (j.error || ""));
+          logmsg(j.status === "done" ? "opencode 安装完成: " + (j.saved_to || "") : "安装失败: " + (j.error || ""));
           buildOcSetup(container);
           ocRefreshStatus();
         }
       }, 2000);
-    } }, "一键安装 opencode"));
+    } }, "确认安装");
+    container.append(
+      el("div", { style: "display:flex;gap:4px;align-items:center;" }, [
+        dirInput,
+        el("button", { class: "aie-btn", onclick: () => openDirPicker(dirInput) }, "浏览"),
+      ]),
+      installBtn,
+      el("div", { style: "color:#777;font-size:11px;" }, [
+        "或 ",
+        el("a", { href: "#", style: "color:#7aa2f7;", onclick: async (e) => {
+          e.preventDefault();
+          logmsg("改用 npm 安装 (需要 Node.js)...");
+          const r = await post("/opencode/install", {});
+          const t = setInterval(async () => {
+            const j = await api(`/jobs/${r.job_id}`);
+            if (j.status === "done" || j.status === "failed") {
+              clearInterval(t);
+              logmsg(j.status === "done" ? "npm 安装完成" : "npm 安装失败: " + (j.error || ""));
+              buildOcSetup(container);
+            }
+          }, 2000);
+        } }, "用 npm 安装 (需要 Node.js)"),
+      ]),
+    );
     return;
   }
   if (st.stage === "start") {

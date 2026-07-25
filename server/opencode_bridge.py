@@ -1,9 +1,12 @@
 import asyncio
+import json
 import os
 import shutil
 import subprocess
 import threading
 import time
+import urllib.request
+import zipfile
 
 import aiohttp
 
@@ -11,19 +14,142 @@ from . import installer
 
 PLUGIN_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WORKDIR = os.path.join(PLUGIN_DIR, "opencode")
+CONFIG_PATH = os.path.join(PLUGIN_DIR, "config.json")
+
+RELEASE_API = "https://api.github.com/repos/anomalyco/opencode/releases/latest"
+
+
+def _read_config():
+    if os.path.exists(CONFIG_PATH):
+        try:
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+
+def _write_config(cfg):
+    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, ensure_ascii=False, indent=2)
 
 _state = {"proc": None, "port": 4097, "exe": None}
 
 
 def find_exe():
-    if _state["exe"] and shutil.which(_state["exe"]):
+    if _state["exe"] and os.path.exists(_state["exe"]):
         return _state["exe"]
+    configured = _read_config().get("opencode_exe")
+    if configured and os.path.exists(configured):
+        _state["exe"] = configured
+        return configured
     for name in ("opencode", "opencode.exe"):
         p = shutil.which(name)
         if p:
             _state["exe"] = p
             return p
     return None
+
+
+def platform_asset_name():
+    if os.name == "nt":
+        machine = (os.environ.get("PROCESSOR_ARCHITECTURE") or "").lower()
+        return "opencode-windows-arm64.zip" if "arm" in machine else "opencode-windows-x64.zip"
+    import platform
+    sysname = platform.system().lower()
+    machine = platform.machine().lower()
+    if sysname == "darwin":
+        return "opencode-darwin-arm64.zip" if "arm" in machine else "opencode-darwin-x64.zip"
+    return "opencode-linux-arm64.zip" if "arm" in machine or "aarch64" in machine else "opencode-linux-x64.zip"
+
+
+def install_binary_job(dest_dir):
+    job = installer.new_job("opencode_binary", dest_dir)
+    job["status"] = "running"
+
+    def work():
+        try:
+            os.makedirs(dest_dir, exist_ok=True)
+            installer._log(job, "fetching latest release info...")
+            req = urllib.request.Request(RELEASE_API, headers={"User-Agent": "ComfyUI-AI-Executor"})
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                release = json.load(resp)
+            want = platform_asset_name()
+            asset = next((a for a in release.get("assets", []) if a.get("name") == want), None)
+            if not asset:
+                job["status"] = "failed"
+                job["error"] = f"asset {want} not found in release {release.get('tag_name')}"
+                return
+            url = asset["browser_download_url"]
+            tag = release.get("tag_name")
+            zip_path = os.path.join(dest_dir, want)
+            installer._log(job, f"downloading {tag} {want} ...")
+            req = urllib.request.Request(url, headers={"User-Agent": "ComfyUI-AI-Executor"})
+            with urllib.request.urlopen(req, timeout=60) as resp, open(zip_path, "wb") as f:
+                total = int(resp.headers.get("Content-Length") or 0)
+                job["total"] = total
+                done = 0
+                while True:
+                    chunk = resp.read(1 << 20)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    done += len(chunk)
+                    job["progress"] = done
+            installer._log(job, "extracting...")
+            with zipfile.ZipFile(zip_path) as z:
+                z.extractall(dest_dir)
+            os.remove(zip_path)
+            exe = None
+            for root, _, files in os.walk(dest_dir):
+                for name in files:
+                    if name in ("opencode.exe", "opencode"):
+                        exe = os.path.join(root, name)
+                        break
+                if exe:
+                    break
+            if not exe:
+                job["status"] = "failed"
+                job["error"] = "opencode binary not found after extraction"
+                return
+            cfg = _read_config()
+            cfg["opencode_exe"] = exe
+            _write_config(cfg)
+            _state["exe"] = exe
+            job["status"] = "done"
+            job["saved_to"] = exe
+            installer._log(job, f"installed {tag} -> {exe}")
+        except Exception as e:
+            job["status"] = "failed"
+            job["error"] = str(e)
+
+    threading.Thread(target=work, daemon=True).start()
+    return job
+
+
+def browse_dirs(path):
+    if not path:
+        drives = []
+        for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+            d = f"{letter}:\\"
+            if os.path.isdir(d):
+                drives.append(d)
+        return {"path": "", "parent": None, "dirs": drives}
+    path = os.path.normpath(path)
+    if not os.path.isdir(path):
+        return {"error": "not a directory", "path": path}
+    parent = os.path.dirname(path)
+    if parent == path:
+        parent = ""
+    dirs = []
+    try:
+        for name in sorted(os.listdir(path)):
+            full = os.path.join(path, name)
+            if os.path.isdir(full):
+                dirs.append(full)
+    except PermissionError:
+        pass
+    return {"path": path, "parent": parent, "dirs": dirs[:200]}
 
 
 def base_url():

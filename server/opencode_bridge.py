@@ -10,7 +10,7 @@ import zipfile
 
 import aiohttp
 
-from . import installer
+from . import installer, proxy
 
 PLUGIN_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WORKDIR = os.path.join(PLUGIN_DIR, "opencode")
@@ -64,16 +64,13 @@ def platform_asset_name():
 
 
 def _url_opener():
-    proxy = (_read_config().get("proxy") or os.environ.get("HTTPS_PROXY")
-             or os.environ.get("https_proxy") or os.environ.get("HTTP_PROXY"))
-    if proxy:
-        if not proxy.startswith("http"):
-            proxy = "http://" + proxy
-        return urllib.request.build_opener(urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
+    p = proxy.get_proxy()
+    if p:
+        return urllib.request.build_opener(urllib.request.ProxyHandler({"http": p, "https": p}))
     return urllib.request.build_opener()
 
 
-def install_binary_job(dest_dir):
+def install_binary_job(dest_dir, timeout_sec=120, auto_retry=True, retry_max=3):
     job = installer.new_job("opencode_binary", dest_dir)
     job["status"] = "running"
 
@@ -94,19 +91,9 @@ def install_binary_job(dest_dir):
             url = asset["browser_download_url"]
             tag = release.get("tag_name")
             zip_path = os.path.join(dest_dir, want)
-            installer._log(job, f"downloading {tag} {want} ...")
-            req = urllib.request.Request(url, headers={"User-Agent": "ComfyUI-AI-Executor"})
-            with opener.open(req, timeout=60) as resp, open(zip_path, "wb") as f:
-                total = int(resp.headers.get("Content-Length") or 0)
-                job["total"] = total
-                done = 0
-                while True:
-                    chunk = resp.read(1 << 20)
-                    if not chunk:
-                        break
-                    f.write(chunk)
-                    done += len(chunk)
-                    job["progress"] = done
+            installer._log(job, f"downloading {tag} {want} via proxy={proxy.get_proxy() or 'direct'} ...")
+            installer.download_with_watch(job, url, zip_path, timeout_sec, auto_retry, retry_max,
+                                          min_bytes=1 << 20)
             installer._log(job, "extracting...")
             with zipfile.ZipFile(zip_path) as z:
                 z.extractall(dest_dir)
@@ -136,6 +123,34 @@ def install_binary_job(dest_dir):
 
     threading.Thread(target=work, daemon=True).start()
     return job
+
+
+def uninstall():
+    stop()
+    exe = find_exe()
+    removed = []
+    locked = []
+    targets = set()
+    if exe and exe.startswith(PLUGIN_DIR):
+        targets.add(os.path.dirname(exe))
+    bin_dir = os.path.join(PLUGIN_DIR, "bin")
+    if os.path.isdir(bin_dir):
+        targets.add(bin_dir)
+    for d in targets:
+        for name in os.listdir(d):
+            p = os.path.join(d, name)
+            try:
+                if os.path.isfile(p):
+                    os.remove(p)
+                    removed.append(p)
+            except OSError:
+                locked.append(p)
+    cfg = _read_config()
+    cfg.pop("opencode_exe", None)
+    _write_config(cfg)
+    _state["exe"] = None
+    return {"ok": not locked, "removed": removed, "locked": locked,
+            "hint": "有文件被占用,请重启 ComfyUI 后再次卸载" if locked else ""}
 
 
 def browse_dirs(path):

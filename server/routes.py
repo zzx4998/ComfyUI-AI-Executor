@@ -149,6 +149,9 @@ async def install_model(request):
         filename=body.get("filename"),
         folder=body.get("folder"),
         use_mirror=bool(body.get("use_mirror", use_mirror)),
+        timeout_sec=int(body.get("timeout_sec", 120)),
+        auto_retry=bool(body.get("auto_retry", True)),
+        retry_max=int(body.get("retry_max", 3)),
     )
     return web.json_response({"job_id": job["id"]})
 
@@ -299,10 +302,20 @@ async def oc_install(request):
         pass
     dest = (body.get("dir") or "").strip()
     if dest:
-        job = opencode_bridge.install_binary_job(dest)
+        job = opencode_bridge.install_binary_job(
+            dest,
+            timeout_sec=int(body.get("timeout_sec", 120)),
+            auto_retry=bool(body.get("auto_retry", True)),
+            retry_max=int(body.get("retry_max", 3)),
+        )
     else:
         job = opencode_bridge.install_opencode_job()
     return web.json_response({"job_id": job["id"]})
+
+
+@routes.post("/ai_executor/opencode/uninstall")
+async def oc_uninstall(request):
+    return web.json_response(opencode_bridge.uninstall())
 
 
 @routes.get("/ai_executor/opencode/browse")

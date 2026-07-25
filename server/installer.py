@@ -9,6 +9,8 @@ import urllib.request
 
 import folder_paths
 
+from . import proxy
+
 JOBS = {}
 
 PLUGIN_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -155,24 +157,77 @@ def guess_folder(filename, override=None):
 
 
 def _url_opener():
-    cfg = {}
-    config_path = os.path.join(PLUGIN_DIR, "config.json")
-    if os.path.exists(config_path):
-        try:
-            with open(config_path, "r", encoding="utf-8") as f:
-                cfg = json.load(f)
-        except Exception:
-            pass
-    proxy = (cfg.get("proxy") or os.environ.get("HTTPS_PROXY")
-             or os.environ.get("https_proxy") or os.environ.get("HTTP_PROXY"))
-    if proxy:
-        if not proxy.startswith("http"):
-            proxy = "http://" + proxy
-        return urllib.request.build_opener(urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
+    p = proxy.get_proxy()
+    if p:
+        return urllib.request.build_opener(urllib.request.ProxyHandler({"http": p, "https": p}))
     return urllib.request.build_opener()
 
 
-def download_model_job(url=None, repo_id=None, filename=None, folder=None, use_mirror=True):
+class StallTimeout(Exception):
+    pass
+
+
+def download_with_watch(job, url, dest, timeout_sec=120, auto_retry=True, retry_max=3, min_bytes=0):
+    attempts = 1 + (retry_max if auto_retry else 0)
+    last_err = None
+    for attempt in range(1, attempts + 1):
+        job["attempt"] = attempt
+        job["attempts"] = attempts
+        try:
+            _download_once(job, url, dest, timeout_sec, min_bytes)
+            return
+        except StallTimeout as e:
+            last_err = e
+            _log(job, f"attempt {attempt}/{attempts} stalled: {e}")
+            try:
+                if os.path.exists(dest):
+                    os.remove(dest)
+            except OSError:
+                pass
+        except Exception as e:
+            last_err = e
+            _log(job, f"attempt {attempt}/{attempts} failed: {e}")
+            break
+    raise last_err if last_err else RuntimeError("download failed")
+
+
+def _download_once(job, url, dest, timeout_sec, min_bytes):
+    state = {"last_progress": -1, "last_time": time.time(), "abort": False}
+
+    def watchdog():
+        while not state["abort"]:
+            time.sleep(2)
+            if job["progress"] != state["last_progress"]:
+                state["last_progress"] = job["progress"]
+                state["last_time"] = time.time()
+            elif time.time() - state["last_time"] > timeout_sec:
+                state["abort"] = True
+                return
+
+    if timeout_sec and timeout_sec > 0:
+        threading.Thread(target=watchdog, daemon=True).start()
+    req = urllib.request.Request(url, headers={"User-Agent": "ComfyUI-AI-Executor"})
+    try:
+        with _url_opener().open(req, timeout=30) as resp, open(dest, "wb") as f:
+            total = int(resp.headers.get("Content-Length") or 0)
+            job["total"] = total
+            job["progress"] = 0
+            while True:
+                if state["abort"]:
+                    raise StallTimeout(f"no data received for {timeout_sec}s")
+                chunk = resp.read(1 << 20)
+                if not chunk:
+                    break
+                f.write(chunk)
+                job["progress"] += len(chunk)
+    finally:
+        state["abort"] = True
+    if min_bytes and os.path.getsize(dest) < min_bytes:
+        raise StallTimeout(f"file too small ({os.path.getsize(dest)} bytes)")
+
+
+def download_model_job(url=None, repo_id=None, filename=None, folder=None, use_mirror=True,
+                       timeout_sec=120, auto_retry=True, retry_max=3):
     label = filename or (url.rsplit("/", 1)[-1] if url else "model")
     job = new_job("model", label)
     job["status"] = "running"
@@ -194,18 +249,7 @@ def download_model_job(url=None, repo_id=None, filename=None, folder=None, use_m
             if use_mirror and "huggingface.co" in dl_url:
                 dl_url = dl_url.replace("https://huggingface.co", "https://hf-mirror.com")
             _log(job, f"downloading {dl_url} -> {dest}")
-            req = urllib.request.Request(dl_url, headers={"User-Agent": "ComfyUI-AI-Executor"})
-            with _url_opener().open(req, timeout=30) as resp, open(dest + ".part", "wb") as f:
-                total = int(resp.headers.get("Content-Length") or 0)
-                job["total"] = total
-                done = 0
-                while True:
-                    chunk = resp.read(1 << 20)
-                    if not chunk:
-                        break
-                    f.write(chunk)
-                    done += len(chunk)
-                    job["progress"] = done
+            download_with_watch(job, dl_url, dest + ".part", timeout_sec, auto_retry, retry_max)
             os.replace(dest + ".part", dest)
             job["status"] = "done"
             job["saved_to"] = dest

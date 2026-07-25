@@ -248,6 +248,34 @@ function openPanel(root, fab) {
   root.style.right = "auto";
 }
 
+function fmtMB(b) { return (b / 1048576).toFixed(1); }
+
+function watchJob(jobId, barBox, onDone) {
+  let lastBytes = 0, lastTime = Date.now();
+  const t = setInterval(async () => {
+    const j = await api(`/jobs/${jobId}`);
+    if (barBox) {
+      const pct = j.total ? Math.min(100, (j.progress / j.total * 100)) : 0;
+      const now = Date.now();
+      const speed = (j.progress - lastBytes) / 1048576 / ((now - lastTime) / 1000 || 1);
+      lastBytes = j.progress; lastTime = now;
+      const attempt = j.attempt ? ` | 第 ${j.attempt}/${j.attempts} 次尝试` : "";
+      barBox.innerHTML = "";
+      const track = el("div", { style: "background:#14141d;border:1px solid #2e2e3a;border-radius:6px;height:14px;overflow:hidden;" });
+      track.append(el("div", { style: `width:${pct}%;height:100%;background:linear-gradient(90deg,#667eea,#764ba2);transition:width .5s;` }));
+      barBox.append(track, el("div", { style: "color:#9ab;font-size:11px;margin-top:2px;" },
+        j.status === "running"
+          ? `${fmtMB(j.progress)} / ${j.total ? fmtMB(j.total) : "?"} MB (${pct.toFixed(0)}%) | ${speed.toFixed(1)} MB/s${attempt}`
+          : `${j.status}${attempt}`));
+    }
+    if (j.status === "done" || j.status === "failed") {
+      clearInterval(t);
+      onDone && onDone(j);
+    }
+  }, 1000);
+  return t;
+}
+
 function openDirPicker(targetInput) {
   const overlay = el("div", { style: "position:fixed;inset:0;background:#000a;z-index:10002;display:flex;align-items:center;justify-content:center;" });
   const box = el("div", { style: "width:420px;max-height:60vh;background:#1b1b26;border:1px solid #3d3d55;border-radius:10px;padding:12px;color:#ddd;font-size:12px;display:flex;flex-direction:column;" });
@@ -599,31 +627,42 @@ async function buildOcSetup(container) {
     return;
   }
   if (st.stage === "install") {
-    line.textContent = "✘ 未安装 opencode — 选择安装目录后自动下载官方独立二进制(无需 Node.js)";
+    line.textContent = "✘ 未安装 opencode — 选择安装目录后自动下载官方独立二进制(无需 Node.js,自动走启动器代理)";
     const def = await api("/opencode/default_install_dir");
     const dirInput = el("input", { class: "aie-input", value: def.dir || "", style: "flex:1;margin:4px 0;" });
+    const timeoutInput = el("input", { class: "aie-input", type: "number", value: 120, min: 0, title: "秒", style: "width:70px;margin:4px 0;" });
+    const retryChk = el("input", { type: "checkbox", checked: "checked" });
+    const retryMax = el("input", { class: "aie-input", type: "number", value: 3, min: 1, max: 10, style: "width:50px;margin:4px 0;" });
+    const barBox = el("div", { style: "margin:4px 0;" });
     const installBtn = el("button", { class: "aie-btn aie-btn-primary", style: "margin:4px 0;", onclick: async () => {
       const dest = dirInput.value.trim();
       if (!dest) return;
       installBtn.disabled = true;
       installBtn.textContent = "安装中...";
       logmsg("下载安装 opencode 到 " + dest + " ...");
-      const r = await post("/opencode/install", { dir: dest });
-      const t = setInterval(async () => {
-        const j = await api(`/jobs/${r.job_id}`);
-        if (j.status === "done" || j.status === "failed") {
-          clearInterval(t);
-          logmsg(j.status === "done" ? "opencode 安装完成: " + (j.saved_to || "") : "安装失败: " + (j.error || ""));
-          buildOcSetup(container);
-          ocRefreshStatus();
-        }
-      }, 2000);
+      const r = await post("/opencode/install", {
+        dir: dest,
+        timeout_sec: parseInt(timeoutInput.value || "120", 10),
+        auto_retry: retryChk.checked,
+        retry_max: parseInt(retryMax.value || "3", 10),
+      });
+      watchJob(r.job_id, barBox, (j) => {
+        logmsg(j.status === "done" ? "opencode 安装完成: " + (j.saved_to || "") : "安装失败: " + (j.error || ""));
+        buildOcSetup(container);
+        ocRefreshStatus();
+      });
     } }, "确认安装");
     container.append(
       el("div", { style: "display:flex;gap:4px;align-items:center;" }, [
         dirInput,
         el("button", { class: "aie-btn", onclick: () => openDirPicker(dirInput) }, "浏览"),
       ]),
+      el("div", { style: "display:flex;gap:6px;align-items:center;color:#999;font-size:11px;flex-wrap:wrap;" }, [
+        "停滞超时(秒,0=不限)", timeoutInput,
+        el("label", { style: "cursor:pointer;" }, [retryChk, " 超时自动重下"]),
+        "次数", retryMax,
+      ]),
+      barBox,
       installBtn,
       el("div", { style: "color:#777;font-size:11px;" }, [
         "或 ",
@@ -631,14 +670,10 @@ async function buildOcSetup(container) {
           e.preventDefault();
           logmsg("改用 npm 安装 (需要 Node.js)...");
           const r = await post("/opencode/install", {});
-          const t = setInterval(async () => {
-            const j = await api(`/jobs/${r.job_id}`);
-            if (j.status === "done" || j.status === "failed") {
-              clearInterval(t);
-              logmsg(j.status === "done" ? "npm 安装完成" : "npm 安装失败: " + (j.error || ""));
-              buildOcSetup(container);
-            }
-          }, 2000);
+          watchJob(r.job_id, barBox, (j) => {
+            logmsg(j.status === "done" ? "npm 安装完成" : "npm 安装失败: " + (j.error || ""));
+            buildOcSetup(container);
+          });
         } }, "用 npm 安装 (需要 Node.js)"),
       ]),
     );
@@ -646,7 +681,16 @@ async function buildOcSetup(container) {
   }
   if (st.stage === "start") {
     line.textContent = "● opencode 已安装,服务未运行";
-    container.append(el("button", { style: "margin:4px 0;", onclick: async () => { await ocStart(); buildOcSetup(container); } }, "启动服务"));
+    container.append(el("div", { style: "display:flex;gap:4px;align-items:center;margin:4px 0;" }, [
+      el("button", { class: "aie-btn aie-btn-primary", onclick: async () => { await ocStart(); buildOcSetup(container); } }, "启动服务"),
+      el("button", { class: "aie-btn", onclick: async (e) => {
+        if (!confirm("确认卸载 opencode?将删除二进制和配置")) return;
+        const r = await post("/opencode/uninstall", {});
+        logmsg(r.ok ? "已卸载" : "部分文件被占用,请重启 ComfyUI 后再卸载: " + (r.locked || []).join(", "));
+        buildOcSetup(container);
+        ocRefreshStatus();
+      } }, "卸载"),
+    ]));
     return;
   }
   line.textContent = st.stage === "auth" ? "● 需要配置 LLM provider 的 API Key" : "● 需要选择默认模型";

@@ -115,11 +115,24 @@ function buildPanel() {
       ])
     ));
 
+  const ocBox = el("details", { style: "margin-bottom:8px;" }, [
+    el("summary", {}, "AI 代理 (opencode)"),
+    el("div", { style: "display:flex;gap:4px;align-items:center;margin:4px 0;" }, [
+      el("span", { id: "aie-oc-dot", style: "width:8px;height:8px;border-radius:50%;background:#666;display:inline-block;" }),
+      el("span", { id: "aie-oc-status", style: "color:#999;flex:1;" }, "未检测"),
+      el("button", { onclick: ocStart }, "启动"),
+      el("button", { onclick: ocStop }, "停止"),
+    ]),
+    el("button", { style: "width:100%;margin:2px 0;background:#2d6a4f;color:#fff;border:none;padding:6px;border-radius:4px;cursor:pointer;",
+      onclick: ocDispatch }, "▶ 派单给 AI 代理执行需求"),
+    el("button", { style: "width:100%;margin:2px 0;", onclick: ocAbort }, "中止当前任务"),
+  ]);
+
   const list = el("div", { id: "aie-results" });
   const detail = el("div", { id: "aie-detail", style: "margin-top:8px;" });
   const log = el("pre", { id: "aie-log", style: "background:#111;padding:6px;max-height:160px;overflow:auto;white-space:pre-wrap;margin-top:8px;" });
 
-  root.append(title, llmBox, reqBox, srcRow, list, detail, log);
+  root.append(title, llmBox, reqBox, srcRow, ocBox, list, detail, log);
   document.body.append(root);
 
   const styleTag = el("style", {}, `
@@ -340,9 +353,97 @@ async function runWorkflow() {
   else logmsg("提交失败: " + (r.error || "") + " " + JSON.stringify(r.node_errors || r.detail || ""));
 }
 
+const oc = { session: null, timer: null, lastMsgCount: 0 };
+
+async function ocRefreshStatus() {
+  const dot = document.getElementById("aie-oc-dot");
+  const txt = document.getElementById("aie-oc-status");
+  if (!dot) return;
+  try {
+    const s = await api("/opencode/status");
+    if (!s.installed) {
+      dot.style.background = "#c0392b";
+      txt.textContent = "未安装 opencode (npm i -g opencode-ai)";
+    } else if (s.running) {
+      dot.style.background = "#27ae60";
+      txt.textContent = `运行中 :${s.port} (v${s.health?.version || "?"})`;
+    } else {
+      dot.style.background = "#e67e22";
+      txt.textContent = "已安装,未运行";
+    }
+  } catch {
+    dot.style.background = "#c0392b";
+    txt.textContent = "检测失败";
+  }
+}
+
+async function ocStart() {
+  logmsg("启动 opencode serve...");
+  const r = await post("/opencode/start", {});
+  if (r.ok) logmsg(r.ready ? `opencode 就绪 (端口 ${r.port})` : "已拉起,等待就绪中...");
+  else logmsg("启动失败: " + (r.error || ""));
+  ocRefreshStatus();
+}
+
+async function ocStop() {
+  await post("/opencode/stop", {});
+  logmsg("已停止 opencode");
+  ocRefreshStatus();
+}
+
+async function ocDispatch() {
+  const req = document.getElementById("aie-req").value.trim();
+  if (!req) { logmsg("请先输入需求"); return; }
+  const r = await post("/opencode/dispatch", { requirement: req });
+  if (!r.ok) { logmsg("派单失败: " + (r.error || "")); return; }
+  oc.session = r.session_id;
+  oc.lastMsgCount = 0;
+  logmsg("已派单, session=" + r.session_id + " — AI 代理开始工作");
+  if (oc.timer) clearInterval(oc.timer);
+  oc.timer = setInterval(ocPoll, 3000);
+}
+
+async function ocAbort() {
+  if (!oc.session) return;
+  await post(`/opencode/abort/${oc.session}`, {});
+  logmsg("已发送中止");
+}
+
+async function ocPoll() {
+  if (!oc.session) return;
+  try {
+    const msgs = await api(`/opencode/messages/${oc.session}`);
+    if (!Array.isArray(msgs)) return;
+    for (const m of msgs) {
+      const role = m.info?.role;
+      for (const p of m.parts || []) {
+        if (p.type === "text" && p.text && role === "assistant") {
+          const key = m.info.id + p.id;
+          if (oc["seen_" + key]) continue;
+          oc["seen_" + key] = true;
+          logmsg("[代理] " + p.text.slice(0, 1500));
+        } else if (p.type === "tool" && p.state?.status === "completed") {
+          const key = m.info.id + p.id;
+          if (oc["seen_" + key]) continue;
+          oc["seen_" + key] = true;
+          logmsg("[工具] " + (p.tool || "") + " ✓");
+        }
+      }
+    }
+    const statuses = await api("/opencode/sessions_status");
+    const st = statuses?.[oc.session];
+    if (st && st.type === "idle") {
+      clearInterval(oc.timer);
+      oc.timer = null;
+      logmsg("— 代理任务结束 —");
+    }
+  } catch (e) { /* keep polling */ }
+}
+
 app.registerExtension({
   name: "AIExecutor.Panel",
   async setup() {
     buildPanel();
+    ocRefreshStatus();
   },
 });

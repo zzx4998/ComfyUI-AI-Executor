@@ -33,11 +33,25 @@ git clone https://github.com/zzx4998/ComfyUI-AI-Executor.git
 |---|---|---|
 | GET | `/ai_executor/search?query=&sources=` | 聚合搜索 |
 | POST | `/ai_executor/workflow` | 拉取工作流 JSON |
+| POST | `/ai_executor/classify` | 工作流功能分类（任务方向/输入槽/提示词槽/尺寸槽/输出节点）|
+| GET | `/ai_executor/env` | 环境清单（全部节点名 + 已有模型）|
 | POST | `/ai_executor/deps/check` | 缺失节点/模型检查 |
 | POST | `/ai_executor/install/nodes` | 安装缺失节点（后台任务）|
 | POST | `/ai_executor/install/model` | 下载模型（url 或 repo_id+filename）|
 | GET | `/ai_executor/jobs/{id}` | 任务进度 |
+| POST | `/ai_executor/upload` | 上传输入素材（multipart 字段 `image`）|
 | POST | `/ai_executor/run` | 参数注入并提交运行 |
+| GET | `/ai_executor/run_status/{prompt_id}` | 执行状态与产物 |
+
+## opencode 代理模式（核心玩法）
+
+插件是 opencode 的 ComfyUI 专用工具系统：opencode 代理读取规则手册，自主完成
+"需求理解 → 翻译扩充检索 → 筛选工作流 → 装依赖 → 参数注入 → 运行 → 失败自愈"。
+
+1. 安装 opencode：`npm i -g opencode-ai`，并给它配好 LLM（`opencode auth login`）
+2. 面板中展开 **"AI 代理 (opencode)"**，点 "启动"（插件会以 `opencode/` 目录为工作目录拉起 `opencode serve`，加载其中的 `AGENTS.md` 规则手册和 `opencode.json` 权限配置）
+3. 输入需求，点 **"▶ 派单给 AI 代理执行需求"**，日志区实时显示代理的每一步
+4. `opencode/opencode.json` 已限制代理权限：禁止编辑/写文件、bash 仅放行 curl 等只读与 API 调用命令——代理只能用环境，不能动环境
 
 ## 设计约束
 

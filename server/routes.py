@@ -6,7 +6,7 @@ import os
 from aiohttp import web
 from server import PromptServer
 
-from . import deps, installer, local_index, runner
+from . import analyzer, deps, installer, local_index, opencode_bridge, runner
 from .sources import civitai, comfyworkflows, github_collections, openart
 
 PLUGIN_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -184,6 +184,105 @@ async def run(request):
             continue
     result = runner.queue_prompt(wf, extra_data={"extra_pnginfo": {}})
     return web.json_response(result)
+
+
+@routes.get("/ai_executor/env")
+async def env_info(request):
+    import folder_paths
+    import nodes as comfy_nodes
+    models = {}
+    for folder in folder_paths.folder_names_and_paths.keys():
+        try:
+            files = folder_paths.get_filename_list(folder)
+            if files:
+                models[folder] = files
+        except Exception:
+            continue
+    node_names = sorted(comfy_nodes.NODE_CLASS_MAPPINGS.keys())
+    return web.json_response({
+        "nodes": node_names,
+        "node_count": len(node_names),
+        "models": models,
+        "api_base": "/ai_executor",
+    })
+
+
+@routes.post("/ai_executor/classify")
+async def classify(request):
+    body = await request.json()
+    wf = body.get("workflow")
+    if wf is None:
+        return web.json_response({"error": "workflow required"}, status=400)
+    return web.json_response(analyzer.classify(wf))
+
+
+@routes.post("/ai_executor/upload")
+async def upload(request):
+    reader = await request.multipart()
+    field = await reader.next()
+    if field is None or field.name != "image":
+        return web.json_response({"error": "multipart field 'image' required"}, status=400)
+    filename = field.filename or "ai_executor_input.png"
+    data = await field.read()
+    saved = runner.save_input_image(filename, data)
+    return web.json_response({"ok": True, "filename": saved})
+
+
+@routes.get("/ai_executor/run_status/{prompt_id}")
+async def run_status(request):
+    return web.json_response(runner.run_status(request.match_info["prompt_id"]))
+
+
+@routes.get("/ai_executor/opencode/status")
+async def oc_status(request):
+    return web.json_response(await opencode_bridge.status())
+
+
+@routes.post("/ai_executor/opencode/start")
+async def oc_start(request):
+    result = opencode_bridge.start()
+    if result.get("ok"):
+        for _ in range(20):
+            if await opencode_bridge.health():
+                result["ready"] = True
+                break
+            await asyncio.sleep(0.5)
+    return web.json_response(result)
+
+
+@routes.post("/ai_executor/opencode/stop")
+async def oc_stop(request):
+    return web.json_response(opencode_bridge.stop())
+
+
+@routes.post("/ai_executor/opencode/dispatch")
+async def oc_dispatch(request):
+    body = await request.json()
+    requirement = (body.get("requirement") or "").strip()
+    if not requirement:
+        return web.json_response({"ok": False, "error": "requirement required"}, status=400)
+    host = request.host
+    result = await opencode_bridge.dispatch(
+        requirement=requirement,
+        api_base=f"http://{host}/ai_executor",
+        images=body.get("images"),
+    )
+    return web.json_response(result)
+
+
+@routes.get("/ai_executor/opencode/messages/{session_id}")
+async def oc_messages(request):
+    return web.json_response(await opencode_bridge.messages(request.match_info["session_id"]))
+
+
+@routes.get("/ai_executor/opencode/sessions_status")
+async def oc_sessions_status(request):
+    return web.json_response(await opencode_bridge.session_status())
+
+
+@routes.post("/ai_executor/opencode/abort/{session_id}")
+async def oc_abort(request):
+    return web.json_response(await opencode_bridge.abort(request.match_info["session_id"]))
 
 
 def setup():

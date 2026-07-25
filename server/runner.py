@@ -64,3 +64,30 @@ def queue_prompt(workflow, extra_data=None):
     outputs = valid[2]
     server.prompt_queue.put((number, prompt_id, workflow, extra_data, outputs))
     return {"ok": True, "prompt_id": prompt_id, "number": number}
+
+
+def run_status(prompt_id):
+    server = PromptServer.instance
+    history = server.prompt_queue.get_history(prompt_id=prompt_id)
+    if prompt_id not in history:
+        running = any(x[1] == prompt_id for x in server.prompt_queue.currently_running.values())
+        queued = any(x[1] == prompt_id for x in server.prompt_queue.queue)
+        return {"status": "running" if running else ("queued" if queued else "unknown")}
+    entry = history[prompt_id]
+    outputs = []
+    for nid, out in (entry.get("outputs") or {}).items():
+        for key in ("images", "gifs", "videos"):
+            for f in out.get(key, []) or []:
+                outputs.append({
+                    "node": nid,
+                    "filename": f.get("filename"),
+                    "subfolder": f.get("subfolder", ""),
+                    "type": f.get("type", "output"),
+                    "view_url": f"/view?filename={f.get('filename')}&subfolder={f.get('subfolder', '')}&type={f.get('type', 'output')}",
+                })
+    status = entry.get("status") or {}
+    return {
+        "status": "done" if status.get("completed") else ("error" if status.get("status_str") == "error" else "running"),
+        "messages": status.get("messages", []),
+        "outputs": outputs,
+    }

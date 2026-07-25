@@ -715,18 +715,34 @@ async function buildOcSetup(container) {
     if (!r.ok) { connMsg.textContent = "连接失败: " + (r.error || r.response || ""); return; }
     const prov2 = await api("/opencode/providers");
     const p = (prov2.providers || []).find(x => x.id === pid);
-    if (!p || !p.connected) { connMsg.textContent = "Key 已保存但 provider 未连接,请检查 Key"; return; }
+    if (!p || !p.connected) { connMsg.textContent = "Key 已保存但 provider 未连接,请检查 Key 是否属于该服务商"; return; }
+    showModels(p);
+  } }, "连接");
+  const showModels = (p) => {
     const models = p.models || [];
     modelSel.innerHTML = "";
     for (const m of models) modelSel.append(el("option", { value: m }, m));
     if (models.length) {
       modelSel.style.display = "";
       saveBtn.style.display = "";
-      connMsg.textContent = `连接成功,${models.length} 个模型可选,请选择后保存`;
+      connMsg.textContent = `${p.name} 已连接,${models.length} 个模型可选,请选择后保存`;
     } else {
-      connMsg.textContent = "连接成功,但该 provider 未返回模型列表";
+      connMsg.textContent = "已连接,但该 provider 未返回模型列表";
     }
-  } }, "连接");
+  };
+  const onProviderChange = () => {
+    const p = list.find(x => x.id === sel.value);
+    if (p && p.connected) {
+      connMsg.textContent = "该 provider 已连接,无需重复输入 Key";
+      showModels(p);
+    } else {
+      modelSel.style.display = "none";
+      saveBtn.style.display = "none";
+      connMsg.textContent = "";
+    }
+  };
+  sel.addEventListener("change", onProviderChange);
+  onProviderChange();
   container.append(sel, el("div", { style: "display:flex;gap:4px;align-items:center;" }, [key, connectBtn]), connMsg, modelSel, saveBtn);
 }
 

@@ -28,6 +28,8 @@
   - 「抠白底」→ ["background remove", "BiRefNet", "rembg workflow"]
   - 「图生视频」→ ["wan i2v", "image to video wan2.2"]
 - 每组词调用 `GET /search?query=Q&sources=civitai,openart,github&limit=10`，合并去重；结果少于 3 条就换同义词继续搜
+- `/search` 返回的 `errors` 字段含各来源失败原因，据此调整（换词/换来源）
+- **补充手段**：某个来源持续失败或结果稀少时，允许用 WebFetch 直接搜索来源站页面（如 `https://civitai.com/search/models?query=...`）找到工作流页面链接，再把链接整理进候选；禁止访问与任务无关的网站
 - 来源优先级：发布日期新 > 底模与 `/env` 已有模型匹配 > 下载/点赞高
 
 ### 阶段2 上报候选 (必须调用本接口,禁止只发文字)

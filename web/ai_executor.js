@@ -419,6 +419,7 @@ async function ocStop() {
 async function ocDispatch() {
   const req = document.getElementById("aie-req").value.trim();
   if (!req) { logmsg("请先输入需求"); return; }
+  if (oc.timer) { logmsg("已有任务在执行中,请先「中止」或等待完成"); return; }
   const r = await post("/opencode/dispatch", { requirement: req });
   if (!r.ok) { logmsg("派单失败: " + (r.error || "")); return; }
   oc.session = r.session_id;
@@ -431,6 +432,8 @@ async function ocDispatch() {
 async function ocAbort() {
   if (!oc.session) return;
   await post(`/opencode/abort/${oc.session}`, {});
+  if (oc.timer) { clearInterval(oc.timer); oc.timer = null; }
+  ocSetBusy(false);
   logmsg("已发送中止");
 }
 

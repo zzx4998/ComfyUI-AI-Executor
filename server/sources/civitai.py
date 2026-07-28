@@ -4,13 +4,18 @@ API = "https://civitai.com/api/v1"
 
 
 async def search(query, limit=20, page=1):
-    data = await fetch_json(f"{API}/models", params={
+    params = {
         "query": query,
         "tag": "comfyui workflow",
         "limit": str(limit),
         "page": str(page),
         "nsfw": "false",
-    })
+    }
+    try:
+        data = await fetch_json(f"{API}/models", params=params)
+    except Exception:
+        params.pop("tag", None)
+        data = await fetch_json(f"{API}/models", params=params)
     results = []
     for item in data.get("items", []):
         versions = item.get("modelVersions") or []

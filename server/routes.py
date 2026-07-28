@@ -95,7 +95,11 @@ async def search(request):
                     kwargs["repos"] = cfg["github_repos"]
             return await mod.search(query, limit=limit, **kwargs)
         except Exception as e:
-            errors[name] = str(e)
+            detail = str(e)
+            resp = getattr(e, "status", None)
+            if resp:
+                detail = f"HTTP {resp}: {getattr(e, 'message', '')}"
+            errors[name] = detail
             return []
 
     batches = await asyncio.gather(*(run_source(s) for s in sources))

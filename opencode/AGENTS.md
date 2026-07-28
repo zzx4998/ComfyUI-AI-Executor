@@ -4,65 +4,72 @@
 
 ## 铁律 (不可违反)
 
-1. 禁止修改 ComfyUI 本体、其他插件的任何代码文件，禁止修改环境依赖（pip uninstall/upgrade 已有包一律禁止）
+1. 禁止修改 ComfyUI 本体、其他插件的任何代码文件，禁止修改环境依赖（pip uninstall/upgrade/install 一律禁止）
 2. 只允许调用插件 API（基址在任务消息中给出，如 `http://127.0.0.1:8188/ai_executor`）和操作当前工作目录
-3. 禁止 pip install 新包；节点依赖安装只能通过插件 API `/install/nodes` 完成
-4. 调用 API 用 `curl.exe`（Windows 自带），JSON body 写入临时文件后用 `curl.exe -X POST -H "Content-Type: application/json" -d @body.json URL`
+3. 调用 API 用 `curl.exe`，JSON body 用 `echo {...} > body.json` 写临时文件后 `curl.exe -X POST -H "Content-Type: application/json" -d @body.json URL`
+4. 插件 API 连接失败（ComfyUI 重启中）时，退避重试（每 10 秒一次，最长 3 分钟），禁止放弃
+5. **禁止自行从本地文件系统找工作流或图片**——检索只能调 `/search` 接口；只有用户明确给了素材文件时才能用本地图片
+6. **禁止擅自选定工作流**——候选必须上报给用户，等用户选择后才能继续
+7. **禁止自己生成效果图**——样例图/视频只能用来源网站上的原始素材
+
+## 分阶段流水线 (严格按序,禁止跳步)
+
+### 阶段0 需求确认
+把用户需求（通常是中文）解析为固定 JSON 发给用户确认：
+```
+{任务类型: text2img/img2img/inpaint/outpaint/face_swap/upscale/video_t2v/video_i2v/video_upscale/bg_remove/style_transfer/pose_control/other,
+ 输入素材: <仅用户明确提供的>, 风格: <风格关键词>, 尺寸: <宽x高或null>, 约束: <质量/速度/显存等>}
+```
+用户回复确认或修正后才继续；用户 3 分钟内未回复则按解析结果继续并说明。
+
+### 阶段1 在线检索
+- 先翻译成英文，再扩充成 3-6 组检索词（任务词 + 节点/技术词 + 模型词）
+  - 「磨皮修脸」→ ["face detailer", "ADetailer face", "face restore upscale"]
+  - 「抠白底」→ ["background remove", "BiRefNet", "rembg workflow"]
+  - 「图生视频」→ ["wan i2v", "image to video wan2.2"]
+- 每组词调用 `GET /search?query=Q&sources=civitai,openart,github&limit=10`，合并去重；结果少于 3 条就换同义词继续搜
+- 来源优先级：发布日期新 > 底模与 `/env` 已有模型匹配 > 下载/点赞高
+
+### 阶段2 上报候选 (必须调用本接口,禁止只发文字)
+挑 3-5 个候选，调用 `POST /candidates/present`：
+```json
+{"candidates": [{
+  "title": "标题", "source": "civitai", "url": "原页面链接",
+  "published_at": "发布日期", "base_model": "底模",
+  "description": "原网站的文字说明(摘录)",
+  "reason": "为什么适合用户需求(你自己写,结合任务类型/底模/依赖)",
+  "samples": [{"type": "image|video", "url": "来源站原始样例URL"}]
+}]}
+```
+- samples 必须来自来源网站，插件会自动下载缓存并展示给用户
+- 接口返回 `{batch_id, token}`——**token 保存好，阶段4 必需**
+- 上报后用一句话告诉用户"候选已展示在面板中，请选择"，然后**停止行动等待**
+
+### 阶段3 等待用户选择
+- 你在 `POST /candidates/choose` 后会收到一条"用户已选择候选 #N"的消息
+- 没收到前禁止任何落地动作（/workflows/save 没有有效 token 会被 403 拒绝）
+
+### 阶段4 落地
+1. 拉取选定工作流 JSON（`POST /workflow` body 为搜索结果对象；Civitai 来源若文件缺失，从样例图 meta 的 workflow 字段取 UI 格式）
+2. 必须是 **UI 格式**（含 nodes/links 数组）；若只有 API 格式，告知用户"该工作流只能运行不能画布编辑"并询问是否继续
+3. `POST /workflows/save` `{batch_id, token, filename, workflow}` → 保存成功后面板会出现"在画布中打开"按钮
+4. `POST /deps/check` 检查缺失节点/模型：
+   - 缺失节点 → `POST /install/nodes`，轮询 `GET /jobs/{id}` 到 done；needs_restart=true 时告诉用户"请重启 ComfyUI，重启后我会继续"（你和服务不会被杀掉，重启后插件会发消息让你继续）
+   - 缺失模型 → 推断 HuggingFace repo_id+filename（不确定就给候选让用户定）→ `POST /install/model`，轮询到 done；>10GB 先报大小再下
+5. 全部就绪后用中文汇报：工作流名/来源链接/安装了什么/还需用户做什么（点画布打开按钮、填提示词、点运行）
 
 ## API 速查
 
-| 方法 | 路径 | 用途 |
+| 方法 | 路径 | 阶段 |
 |---|---|---|
-| GET | `/ping` | 连通性检查 |
-| GET | `/env` | 环境清单：全部已注册节点名 + 各目录已有模型文件名 |
-| GET | `/search?query=Q&sources=local,civitai,comfyworkflows,openart,github&limit=10` | 多源工作流搜索 |
-| POST | `/workflow` body: 搜索结果对象原样回传 | 拉取工作流 JSON |
-| POST | `/classify` body: {workflow} | 功能分类：任务方向、图片输入槽、提示词槽、种子槽、尺寸槽、输出节点、模型加载器 |
-| POST | `/deps/check` body: {workflow} | 缺失节点/模型检查 |
-| POST | `/install/nodes` body: {class_types:[...]} | 后台安装缺失节点（返回 job_id）|
-| POST | `/install/model` body: {repo_id, filename} 或 {url}，可选 {folder, use_mirror} | 后台下载模型（HuggingFace 优先，use_mirror 走 hf-mirror）|
-| GET | `/jobs/{job_id}` | 安装任务进度，status=done/failed |
-| POST | `/upload` multipart 字段名 `image` | 上传用户素材到 input/ |
-| POST | `/run` body: {workflow, params?, images?, randomize_seed?} | 提交执行 |
-| GET | `/run_status/{prompt_id}` | 执行状态与产物（view_url 可下载）|
-
-## 执行流程 (严格按序)
-
-### 1. 需求理解
-把用户需求（通常是中文）解析为：
-- task_type: text2img / img2img / inpaint / outpaint / face_swap / upscale / video_t2v / video_i2v / video_upscale / bg_remove / style_transfer / pose_control / other
-- 输入素材、目标风格、尺寸、数量、质量/速度偏好
-
-### 2. 检索词翻译与扩充（关键步骤，禁止跳过）
-- 先翻译成英文，再扩充成 3-6 组检索词，覆盖：任务词 + 节点/技术词 + 模型词
-- 例：「把照片变成吉卜力风格」→ ["ghibli style transfer", "IPAdapter style transfer", "style transfer workflow"]
-- 例：「磨皮修脸」→ ["face detailer", "ADetailer face", "face restore upscale"]
-- 例：「图生视频」→ ["wan i2v", "image to video wan2.1", "SVD image to video"]
-- 每组词分别调用 /search，合并去重；结果少于 3 条就换同义词继续搜
-
-### 3. 筛选工作流
-对候选（最多 5 个）拉取 JSON 并 /classify：
-- 分类结果 tasks 必须覆盖第 1 步的 task_type
-- 优先选择：发布日期新、底模在 /env 已有模型中存在、缺失依赖少、本地 local 来源
-- 读 JSON 拓扑确认它真的能完成需求（不是只有标题像）
-- 注意：/run 只接受 API 格式工作流（id → {class_type, inputs}）。画布导出的 UI 格式（含 nodes/links 数组）只能用于分析和参考；要运行就获取该工作流的 API 格式版本（在线来源多数是 API 格式）
-
-### 4. 依赖处理
-- /deps/check → 缺失节点：/install/nodes，轮询 /jobs 到 done；若 needs_restart=true，明确告诉用户"请重启 ComfyUI 后重新派单"并停止
-- 缺失模型：根据工作流中的模型名推断 HuggingFace repo_id+filename（不确定就给多个候选让用户确认，或选社区主流来源），/install/model 下载，轮询到 done
-- 大型视频模型（>10GB）下载前向用户说明大小再下
-
-### 5. 参数注入并运行
-- /classify 给出的槽位生成 params：`{"节点ID": {"字段": 值}}`
-  - text_slots：写入根据需求生成的英文提示词（正面/负面分清，负面提示词节点写负面词）
-  - image_inputs：有用户素材时，先 /upload，再在 /run 的 images 里指定 {filename, nodes:[节点ID]}
-  - size_slots：按需求改 width/height；seed 交给 randomize_seed
-- POST /run → 拿 prompt_id → 轮询 /run_status 到 done 或 error
-
-### 6. 失败自愈
-- validate_prompt 失败：读 node_errors，修正参数或换工作流重试，最多 3 次
-- 执行 error：读 messages 里的报错，判断是缺模型/参数错/显存不足，修复后重试；显存不足则降低分辨率或换 fp8/gguf 版本模型
-- 3 次仍失败：如实汇报失败原因和已尝试的方案
-
-### 7. 汇报
-中文总结：选用的工作流（标题+来源+链接）、安装了什么、注入了什么参数、产物 view_url 列表（用户可在浏览器直接打开）。
+| GET | `/ping` `/env` | 0/1 |
+| GET | `/search?query=&sources=&limit=` | 1 |
+| POST | `/workflow` | 1/4 |
+| POST | `/classify` {workflow} | 1/4 |
+| POST | `/candidates/present` | 2 (必经) |
+| POST | `/workflows/save` {batch_id,token,filename,workflow} | 4 (需token) |
+| POST | `/deps/check` | 4 |
+| POST | `/install/nodes` `/install/model` | 4 |
+| GET | `/jobs/{job_id}` | 4 |
+| POST | `/run` {workflow,params?,images?} | 4 (仅用户明确要求直接运行时) |
+| GET | `/run_status/{prompt_id}` | 4 |

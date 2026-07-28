@@ -124,13 +124,15 @@ function buildPanel() {
     (() => { const d = el("div"); buildOcSetup(d); return d; })(),
   ]);
 
+  const candBox = el("div", { id: "aie-candidates" });
+
   const busy = el("div", { id: "aie-busy", style: "display:none;align-items:center;gap:8px;color:#9ab;margin-top:8px;font-size:12px;" }, [
     el("span", { class: "aie-spin" }),
     el("span", { id: "aie-busy-text" }, "代理运行中..."),
   ]);
   const log = el("pre", { id: "aie-log", style: "background:#14141d;border:1px solid #2e2e3a;border-radius:6px;padding:6px;max-height:160px;overflow:auto;white-space:pre-wrap;margin-top:8px;" });
 
-  root.append(title, llmBox, reqBox, ocBox, busy, log);
+  root.append(title, llmBox, reqBox, candBox, ocBox, busy, log);
   document.body.append(root);
 
   const styleTag = el("style", {}, `
@@ -471,12 +473,96 @@ async function ocPoll() {
   } catch (e) { /* keep polling */ }
 }
 
+const cand = { shown: {}, chosenBatch: null, chosenIdx: null };
+
+async function candidatesPoll() {
+  const box = document.getElementById("aie-candidates");
+  if (!box) return;
+  try {
+    const r = await api("/candidates/pending");
+    for (const b of r.batches || []) {
+      if (cand.shown[b.id]) continue;
+      cand.shown[b.id] = true;
+      renderBatch(box, b);
+      logmsg(`代理上报了 ${b.candidates.length} 个候选工作流,请在卡片中选择`);
+      ocSetBusy(true, "等待你选择候选工作流...");
+    }
+  } catch { /* ignore */ }
+  if (cand.chosenBatch) {
+    try {
+      const b = await api(`/candidates/batch/${cand.chosenBatch}`);
+      if (b.workflow && !cand["opened_" + b.id]) {
+        cand["opened_" + b.id] = true;
+        renderOpenButton(box, b);
+      }
+    } catch { /* ignore */ }
+  }
+}
+
+function renderBatch(box, batch) {
+  const wrap = el("div", { class: "aie-card", id: "aie-batch-" + batch.id }, [
+    el("div", { style: "font-weight:600;color:#cfd2e0;margin-bottom:4px;" }, `候选工作流 (${batch.candidates.length}) — 请选择一个`),
+  ]);
+  for (const c of batch.candidates) {
+    const card = el("div", { style: "border:1px solid #34343f;border-radius:6px;padding:6px;margin:6px 0;background:#1c1c28;" });
+    card.append(el("div", { style: "font-weight:bold;" }, `#${c.index} [${c.source}] ${c.title}`));
+    card.append(el("div", { style: "color:#999;font-size:11px;" },
+      `发布: ${c.published_at ? new Date(c.published_at).toLocaleDateString() : "-"} | 底模: ${c.base_model || "-"}`));
+    if (c.url) card.append(el("a", { href: c.url, target: "_blank", style: "color:#7aa2f7;font-size:11px;" }, "原始页面 ↗"));
+    if (c.description) card.append(el("div", { style: "color:#bbb;margin-top:4px;white-space:pre-wrap;" }, c.description));
+    if (c.reason) card.append(el("div", { style: "color:#8fbc8f;margin-top:4px;" }, "推荐理由: " + c.reason));
+    if (c.samples && c.samples.length) {
+      const row = el("div", { style: "display:flex;gap:4px;margin-top:4px;flex-wrap:wrap;" });
+      for (const s of c.samples) {
+        if (s.type === "video") row.append(el("video", { src: s.url, style: "width:110px;height:110px;object-fit:cover;border-radius:4px;", muted: true, loop: true, autoplay: true, controls: true }));
+        else row.append(el("img", { src: s.url, style: "width:110px;height:110px;object-fit:cover;border-radius:4px;cursor:zoom-in;", loading: "lazy", onclick: () => window.open(s.url, "_blank") }));
+      }
+      card.append(row);
+    }
+    card.append(el("button", { class: "aie-btn aie-btn-primary", style: "margin-top:6px;", onclick: async (e) => {
+      e.target.disabled = true;
+      e.target.textContent = "已选择,通知代理中...";
+      const r = await post("/candidates/choose", { batch_id: batch.id, index: c.index, session_id: oc.session });
+      if (r.ok) {
+        cand.chosenBatch = batch.id;
+        cand.chosenIdx = c.index;
+        wrap.querySelectorAll("button").forEach(b => { if (b !== e.target) b.style.display = "none"; });
+        e.target.textContent = "✔ 已选定";
+        logmsg(`已选择 #${c.index}《${c.title}》,代理继续执行 (保存工作流+处理依赖)`);
+        ocSetBusy(true, "代理正在落地选定的工作流...");
+      } else {
+        e.target.disabled = false;
+        e.target.textContent = "选择这个";
+        logmsg("选择失败: " + (r.error || ""));
+      }
+    } }, "选择这个"));
+    wrap.append(card);
+  }
+  box.append(wrap);
+}
+
+function renderOpenButton(box, batch) {
+  const wrap = document.getElementById("aie-batch-" + batch.id);
+  if (!wrap) return;
+  const c = batch.candidates[batch.chosen] || {};
+  const btn = el("button", { class: "aie-btn aie-btn-primary", style: "width:100%;padding:8px;margin-top:6px;", onclick: async () => {
+    if (!confirm("将在画布中打开工作流《" + (c.title || "") + "》,当前画布内容会被替换(请先自行保存)。继续?")) return;
+    const r = await api(`/workflows/load/${batch.id}`);
+    if (r.error) { logmsg("打开失败: " + r.error); return; }
+    await app.loadGraphData(r.workflow);
+    logmsg("工作流已在画布中打开: " + (c.title || ""));
+  } }, `⤴ 在画布中打开《${c.title || "选定的工作流"}》`);
+  wrap.append(btn);
+  logmsg("选定的工作流已保存,可直接在画布中打开");
+}
+
 app.registerExtension({
   name: "AIExecutor.Panel",
   async setup() {
     buildPanel();
     ocRefreshStatus();
     onboardingReminder();
+    setInterval(candidatesPoll, 3000);
   },
 });
 

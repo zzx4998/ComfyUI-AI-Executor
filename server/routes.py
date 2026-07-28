@@ -7,7 +7,7 @@ import aiohttp
 from aiohttp import web
 from server import PromptServer
 
-from . import analyzer, deps, installer, local_index, opencode_bridge, proxy, runner
+from . import analyzer, candidates, deps, installer, local_index, opencode_bridge, proxy, runner
 from .sources import civitai, github_collections, openart
 
 PLUGIN_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -326,6 +326,92 @@ def _parse_models_response(status, text):
         return web.json_response({"ok": False, "error": "response is not JSON"})
     ids = sorted(m.get("id") for m in (data.get("data") or []) if m.get("id"))
     return web.json_response({"ok": True, "models": ids})
+
+
+@routes.post("/ai_executor/candidates/present")
+async def candidates_present(request):
+    body = await request.json()
+    items = body.get("candidates")
+    if not items:
+        return web.json_response({"error": "candidates required"}, status=400)
+    result = candidates.present(items)
+    return web.json_response(result)
+
+
+@routes.get("/ai_executor/candidates/pending")
+async def candidates_pending(request):
+    return web.json_response({"batches": candidates.pending_batches()})
+
+
+@routes.post("/ai_executor/candidates/choose")
+async def candidates_choose(request):
+    body = await request.json()
+    chosen = candidates.choose(body.get("batch_id", ""), int(body.get("index", -1)))
+    if not chosen:
+        return web.json_response({"ok": False, "error": "invalid batch or index"}, status=404)
+    session_id = body.get("session_id")
+    if session_id:
+        try:
+            await opencode_bridge._post(f"/session/{session_id}/prompt_async", {"parts": [{"type": "text",
+                "text": f"用户已在面板中选择了候选 #{chosen['index']}: 《{chosen['title']}》。请继续阶段4: 拉取该工作流,转换为UI格式,调用 /workflows/save 保存,然后处理依赖。"}]})
+        except Exception:
+            pass
+    return web.json_response({"ok": True, "chosen": chosen})
+
+
+@routes.get("/ai_executor/candidates/batch/{batch_id}")
+async def candidates_batch(request):
+    b = candidates.get_batch(request.match_info["batch_id"])
+    if not b:
+        return web.json_response({"error": "not found"}, status=404)
+    return web.json_response({k: v for k, v in b.items() if k != "token"})
+
+
+@routes.get("/ai_executor/samples/{name}")
+async def samples_serve(request):
+    p = candidates.get_sample_path(request.match_info["name"])
+    if not p:
+        return web.json_response({"error": "not found"}, status=404)
+    return web.FileResponse(p)
+
+
+@routes.post("/ai_executor/workflows/save")
+async def workflows_save(request):
+    body = await request.json()
+    batch_id = body.get("batch_id", "")
+    token = body.get("token", "")
+    if not candidates.check_token(batch_id, token):
+        return web.json_response({"ok": False, "error": "invalid token or no user selection yet"}, status=403)
+    wf = body.get("workflow")
+    if not isinstance(wf, dict) or "nodes" not in wf:
+        return web.json_response({"ok": False, "error": "workflow must be UI format (with nodes/links)"}, status=400)
+    filename = os.path.basename(body.get("filename") or "ai_executor_workflow.json")
+    if not filename.endswith(".json"):
+        filename += ".json"
+    port = _comfy_port()
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as s:
+        async with s.post(f"http://127.0.0.1:{port}/userdata/workflows/{filename}",
+                          json=wf, headers={"Content-Type": "application/json"}) as r:
+            if r.status not in (200, 201):
+                return web.json_response({"ok": False, "error": f"userdata save failed: HTTP {r.status}"}, status=502)
+    candidates.set_workflow(batch_id, wf)
+    return web.json_response({"ok": True, "filename": f"workflows/{filename}"})
+
+
+def _comfy_port():
+    try:
+        from comfy.cli_args import args as comfy_args
+        return getattr(comfy_args, "port", 8188)
+    except Exception:
+        return 8188
+
+
+@routes.get("/ai_executor/workflows/load/{batch_id}")
+async def workflows_load(request):
+    b = candidates.get_batch(request.match_info["batch_id"])
+    if not b or not b.get("workflow"):
+        return web.json_response({"error": "workflow not saved yet"}, status=404)
+    return web.json_response({"workflow": b["workflow"], "chosen": b["chosen"]})
 
 
 @routes.get("/ai_executor/opencode/onboarding")

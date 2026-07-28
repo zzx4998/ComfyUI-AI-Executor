@@ -488,6 +488,17 @@ async function candidatesPoll() {
       ocSetBusy(true, "等待你选择候选工作流...");
     }
   } catch { /* ignore */ }
+  try {
+    const rp = await api("/system/restart_pending");
+    if (rp.pending && !cand.restartShown) {
+      cand.restartShown = true;
+      renderRestartConfirm(box, rp.pending);
+    } else if (!rp.pending && cand.restartShown) {
+      cand.restartShown = false;
+      const elx = document.getElementById("aie-restart-card");
+      if (elx) elx.remove();
+    }
+  } catch { /* ignore */ }
   if (cand.chosenBatch) {
     try {
       const b = await api(`/candidates/batch/${cand.chosenBatch}`);
@@ -497,6 +508,38 @@ async function candidatesPoll() {
       }
     } catch { /* ignore */ }
   }
+}
+
+function renderRestartConfirm(box, pending) {
+  const card = el("div", { class: "aie-card", id: "aie-restart-card", style: "border-color:#e67e22;" }, [
+    el("div", { style: "font-weight:600;color:#e67e22;" }, "⚠ 代理请求重启 ComfyUI"),
+    el("div", { style: "color:#bbb;margin:4px 0;" }, pending.reason || "安装的新节点需要重启生效。重启后代理会自动继续。"),
+    el("div", { style: "display:flex;gap:4px;" }, [
+      el("button", { class: "aie-btn aie-btn-primary", onclick: async (e) => {
+        if (!confirm("确认重启 ComfyUI?请确保没有正在生成的任务和未保存的画布")) return;
+        e.target.disabled = true;
+        e.target.textContent = "重启中...";
+        await post("/system/restart", {});
+        logmsg("ComfyUI 重启中 (由守护进程拉起),插件恢复后代理会自动继续");
+        const t = setInterval(async () => {
+          try {
+            const p = await api("/ping");
+            if (p.ok) {
+              clearInterval(t);
+              logmsg("ComfyUI 已重启完成");
+              ocRefreshStatus();
+            }
+          } catch { /* still down */ }
+        }, 5000);
+      } }, "确认重启 ComfyUI"),
+      el("button", { class: "aie-btn", onclick: () => {
+        card.remove();
+        cand.restartShown = false;
+        logmsg("已忽略重启请求 (新节点不会生效,代理可能报错)");
+      } }, "忽略"),
+    ]),
+  ]);
+  box.append(card);
 }
 
 function renderBatch(box, batch) {

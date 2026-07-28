@@ -2,6 +2,8 @@ import asyncio
 import base64
 import json
 import os
+import sys
+import threading
 
 import aiohttp
 from aiohttp import web
@@ -475,9 +477,94 @@ async def oc_auth(request):
     return web.json_response(result)
 
 
+RESTART_PENDING = {}
+RESUME_PATH = os.path.join(PLUGIN_DIR, "cache", "pending_resume.json")
+
+
+@routes.post("/ai_executor/system/restart_request")
+async def restart_request(request):
+    body = await request.json()
+    if not candidates.check_token(body.get("batch_id", ""), body.get("token", "")):
+        return web.json_response({"ok": False, "error": "invalid token"}, status=403)
+    RESTART_PENDING.update({
+        "reason": body.get("reason", "安装的新节点需要重启 ComfyUI 生效"),
+        "session_id": body.get("session_id"),
+        "batch_id": body.get("batch_id"),
+    })
+    return web.json_response({"ok": True})
+
+
+@routes.get("/ai_executor/system/restart_pending")
+async def restart_pending(request):
+    return web.json_response({"pending": RESTART_PENDING or None})
+
+
+@routes.post("/ai_executor/system/restart")
+async def restart_comfy(request):
+    if not RESTART_PENDING:
+        return web.json_response({"ok": False, "error": "no pending restart"}, status=400)
+    sup = opencode_bridge.supervisor.find_supervisor()
+    if not sup:
+        return web.json_response({"ok": False, "error": "supervisor unavailable"}, status=503)
+    os.makedirs(os.path.dirname(RESUME_PATH), exist_ok=True)
+    with open(RESUME_PATH, "w", encoding="utf-8") as f:
+        json.dump({"session_id": RESTART_PENDING.get("session_id")}, f)
+    RESTART_PENDING.clear()
+
+    def work():
+        r = opencode_bridge.supervisor.restart_comfy(sup)
+        if not r.get("ok"):
+            try:
+                os.remove(RESUME_PATH)
+            except OSError:
+                pass
+
+    threading.Thread(target=work, daemon=True).start()
+    return web.json_response({"ok": True, "started": True})
+
+
+def _register_with_supervisor():
+    sup = opencode_bridge.supervisor.ensure_running()
+    if not sup:
+        return
+    main_py = os.path.abspath(sys.argv[0])
+    comfy_dir = os.path.dirname(main_py)
+    try:
+        opencode_bridge.supervisor.record_comfy(sup, {
+            "pid": os.getpid(),
+            "cmdline": [sys.executable, main_py] + sys.argv[1:],
+            "cwd": comfy_dir,
+            "env": dict(os.environ),
+            "port": _comfy_port(),
+        })
+    except Exception:
+        pass
+
+
+async def _resume_if_pending():
+    if not os.path.exists(RESUME_PATH):
+        return
+    try:
+        with open(RESUME_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        session_id = data.get("session_id")
+        if session_id and await opencode_bridge.health():
+            await opencode_bridge._post(f"/session/{session_id}/prompt_async", {"parts": [{"type": "text",
+                "text": "ComfyUI 已重启完成,插件 API 恢复可用。请继续之前的任务(依赖已装好,可从 /deps/check 重新确认)。"}]})
+        os.remove(RESUME_PATH)
+    except Exception:
+        pass
+
+
 def setup():
     server = PromptServer.instance
     server.app.add_routes(routes)
+    threading.Thread(target=_register_with_supervisor, daemon=True).start()
+    try:
+        loop = asyncio.get_event_loop()
+        loop.call_later(5, lambda: asyncio.ensure_future(_resume_if_pending()))
+    except Exception:
+        pass
 
 
 try:

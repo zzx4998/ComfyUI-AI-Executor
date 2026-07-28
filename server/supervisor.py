@@ -96,10 +96,56 @@ def opencode_stop(port):
     return _post(port, "/opencode/stop", {})
 
 
+def record_comfy(port, info):
+    return _post(port, "/comfy/record", info)
+
+
+def restart_comfy(port):
+    return _post(port, "/comfy/restart", {})
+
+
 def serve():
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-    state = {"proc": None}
+    state = {"proc": None, "comfy": None}
+
+    def restart_comfyui():
+        info = state["comfy"]
+        if not info:
+            return {"ok": False, "error": "no comfy launch info recorded"}
+        pid = info.get("pid")
+        if pid:
+            subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
+                           capture_output=True,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            _log(f"killed comfy pid={pid}, waiting...")
+            time.sleep(3)
+        log_path = os.path.join(CACHE_DIR, "comfyui_restart.log")
+        env = dict(os.environ)
+        env.update(info.get("env") or {})
+        try:
+            with open(log_path, "ab") as logf:
+                proc = subprocess.Popen(
+                    info["cmdline"], cwd=info.get("cwd") or None, env=env,
+                    stdout=logf, stderr=subprocess.STDOUT,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            state["comfy"]["pid"] = proc.pid
+            _log(f"comfy relaunched pid={proc.pid}")
+        except Exception as e:
+            _log(f"comfy relaunch failed: {e}")
+            return {"ok": False, "error": str(e)}
+        port = info.get("port", 8188)
+        deadline = time.time() + 180
+        while time.time() < deadline:
+            try:
+                with urllib.request.urlopen(f"http://127.0.0.1:{port}/ai_executor/ping", timeout=3) as r:
+                    if r.status == 200:
+                        _log("comfy back online")
+                        return {"ok": True, "pid": proc.pid}
+            except Exception:
+                pass
+            time.sleep(3)
+        return {"ok": False, "error": "comfy did not come back within 180s, see comfyui_restart.log"}
 
     class H(BaseHTTPRequestHandler):
         def _json(self, code, obj):
@@ -154,6 +200,12 @@ def serve():
                 state["proc"] = None
                 _log("opencode stopped")
                 self._json(200, {"ok": True})
+            elif self.path == "/comfy/record":
+                state["comfy"] = body
+                _log(f"comfy recorded pid={body.get('pid')} cmd={' '.join(body.get('cmdline') or [])[:120]}")
+                self._json(200, {"ok": True})
+            elif self.path == "/comfy/restart":
+                self._json(200, restart_comfyui())
             else:
                 self._json(404, {"error": "not found"})
 

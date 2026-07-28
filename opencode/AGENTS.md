@@ -54,7 +54,7 @@
 2. 必须是 **UI 格式**（含 nodes/links 数组）；若只有 API 格式，告知用户"该工作流只能运行不能画布编辑"并询问是否继续
 3. `POST /workflows/save` `{batch_id, token, filename, workflow}` → 保存成功后面板会出现"在画布中打开"按钮
 4. `POST /deps/check` 检查缺失节点/模型：
-   - 缺失节点 → `POST /install/nodes`，轮询 `GET /jobs/{id}` 到 done；needs_restart=true 时告诉用户"请重启 ComfyUI，重启后我会继续"（你和服务不会被杀掉，重启后插件会发消息让你继续）
+   - 缺失节点 → `POST /install/nodes`，轮询 `GET /jobs/{id}` 到 done；needs_restart=true 时调用 `POST /system/restart_request` `{batch_id, token, session_id, reason}`——面板会向用户弹出重启确认，用户确认后 ComfyUI 自动重启（你和你的会话不会中断），插件恢复后会通知你继续
    - 缺失模型 → 推断 HuggingFace repo_id+filename（不确定就给候选让用户定）→ `POST /install/model`，轮询到 done；>10GB 先报大小再下
 5. 全部就绪后用中文汇报：工作流名/来源链接/安装了什么/还需用户做什么（点画布打开按钮、填提示词、点运行）
 
@@ -70,6 +70,7 @@
 | POST | `/workflows/save` {batch_id,token,filename,workflow} | 4 (需token) |
 | POST | `/deps/check` | 4 |
 | POST | `/install/nodes` `/install/model` | 4 |
+| POST | `/system/restart_request` {batch_id,token,session_id,reason} | 4 (装节点后需重启时) |
 | GET | `/jobs/{job_id}` | 4 |
 | POST | `/run` {batch_id,token,workflow,params?,images?} | 4 (需token,仅用户明确要求直接运行时) |
 | GET | `/run_status/{prompt_id}` | 4 |

@@ -6,3 +6,5 @@ bin/
 
 opencode/env.json
 opencode/storage*
+
+cache/

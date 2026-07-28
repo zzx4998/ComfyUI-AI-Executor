@@ -367,6 +367,12 @@ async def candidates_choose(request):
     return web.json_response({"ok": True, "chosen": chosen})
 
 
+@routes.post("/ai_executor/candidates/dismiss")
+async def candidates_dismiss(request):
+    candidates.dismiss_all()
+    return web.json_response({"ok": True})
+
+
 @routes.get("/ai_executor/candidates/batch/{batch_id}")
 async def candidates_batch(request):
     b = candidates.get_batch(request.match_info["batch_id"])

@@ -110,6 +110,10 @@ def pending_batches():
     return [v for v in BATCHES.values() if v["chosen"] is None]
 
 
+def dismiss_all():
+    BATCHES.clear()
+
+
 def get_batch(batch_id):
     return BATCHES.get(batch_id)
 

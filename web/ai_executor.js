@@ -433,8 +433,14 @@ async function ocAbort() {
   if (!oc.session) return;
   await post(`/opencode/abort/${oc.session}`, {});
   if (oc.timer) { clearInterval(oc.timer); oc.timer = null; }
+  oc.session = null;
   ocSetBusy(false);
-  logmsg("已发送中止");
+  document.querySelectorAll("#aie-candidates > .aie-card").forEach(c => c.remove());
+  document.querySelectorAll("#aie-candidates > div").forEach(c => c.remove());
+  cand.shown = {};
+  cand.chosenBatch = null;
+  await post("/candidates/dismiss", {});
+  logmsg("已中止任务并清空候选");
 }
 
 async function ocPoll() {
@@ -488,7 +494,7 @@ async function candidatesPoll() {
       cand.shown[b.id] = true;
       renderBatch(box, b);
       logmsg(`代理上报了 ${b.candidates.length} 个候选工作流,请在卡片中选择`);
-      ocSetBusy(true, "等待你选择候选工作流...");
+      if (oc.timer) ocSetBusy(true, "等待你选择候选工作流...");
     }
   } catch { /* ignore */ }
   try {

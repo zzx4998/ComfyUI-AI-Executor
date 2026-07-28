@@ -3,3 +3,6 @@ __pycache__/
 config.json
 .DS_Store
 bin/
+
+opencode/env.json
+opencode/storage*

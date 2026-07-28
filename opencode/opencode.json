@@ -32,5 +32,11 @@
       }
     }
   },
+  "command": {
+    "comfyui_task": {
+      "description": "执行 ComfyUI 图像/视频处理任务 (固定流水线)",
+      "template": "你在一个 ComfyUI 本地环境中执行图像/视频处理任务。规则手册见当前目录 AGENTS.md，必须严格遵守其中的铁律与分阶段流水线。\n\nComfyUI 插件 API 基址: http://127.0.0.1:8188/ai_executor\n\n用户需求: $ARGUMENTS\n\n按 AGENTS.md 的阶段流水线执行：阶段0 需求确认 → 阶段1 在线检索 → 阶段2 上报候选(含样例与说明) → 阶段3 等待用户选择(禁止擅自选定) → 阶段4 落地(保存工作流/装依赖/打开画布/运行)。全程用中文与用户交流。"
+    }
+  },
   "model": "aie-custom/k3"
 }

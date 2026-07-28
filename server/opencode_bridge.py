@@ -206,11 +206,33 @@ TEMPLATE_PATH = os.path.join(WORKDIR, "opencode.template.json")
 RUNTIME_CONFIG_PATH = os.path.join(WORKDIR, "opencode.json")
 
 
+COMMAND_NAME = "comfyui_task"
+
+COMMAND_TEMPLATE = """你在一个 ComfyUI 本地环境中执行图像/视频处理任务。规则手册见当前目录 AGENTS.md，必须严格遵守其中的铁律与分阶段流水线。
+
+ComfyUI 插件 API 基址: {api_base}
+
+用户需求: $ARGUMENTS
+
+按 AGENTS.md 的阶段流水线执行：阶段0 需求确认 → 阶段1 在线检索 → 阶段2 上报候选(含样例与说明) → 阶段3 等待用户选择(禁止擅自选定) → 阶段4 落地(保存工作流/装依赖/打开画布/运行)。全程用中文与用户交流。"""
+
+
 def build_runtime_config():
     cfg = _read_config()
     llm = cfg.get("llm") or {}
     with open(TEMPLATE_PATH, "r", encoding="utf-8") as f:
         data = json.load(f)
+    try:
+        from comfy.cli_args import args as comfy_args
+        port = getattr(comfy_args, "port", 8188)
+    except Exception:
+        port = 8188
+    data["command"] = {
+        COMMAND_NAME: {
+            "description": "执行 ComfyUI 图像/视频处理任务 (固定流水线)",
+            "template": COMMAND_TEMPLATE.format(api_base=f"http://127.0.0.1:{port}/ai_executor"),
+        }
+    }
     env = {}
     base = (llm.get("base_url") or "").strip()
     key = (llm.get("api_key") or "").strip()
@@ -296,17 +318,6 @@ async def _get(path):
             return await r.json(content_type=None)
 
 
-TASK_PROMPT = """你在一个 ComfyUI 本地环境中执行图像/视频处理任务。规则手册见当前目录 AGENTS.md，必须遵守。
-
-ComfyUI 插件 API 基址: {api_base}
-
-用户需求: {requirement}
-
-用户输入素材: {images}
-
-请按 AGENTS.md 的流程执行: 理解需求 → 翻译扩充检索 → 搜索筛选工作流 → 依赖检查与安装 → 参数注入 → 运行 → 汇报结果文件。完成后用中文给出简明总结。"""
-
-
 async def dispatch(requirement, api_base, images=None, title=None):
     if not await health():
         return {"ok": False, "error": "opencode server not running"}
@@ -314,12 +325,15 @@ async def dispatch(requirement, api_base, images=None, title=None):
     sid = session.get("id")
     if not sid:
         return {"ok": False, "error": f"failed to create session: {session}"}
-    prompt = TASK_PROMPT.format(
-        api_base=api_base,
-        requirement=requirement,
-        images=json_images(images),
-    )
-    await _post(f"/session/{sid}/prompt_async", {"parts": [{"type": "text", "text": prompt}]})
+    args = requirement
+    if images:
+        args += "\n\n用户输入素材: " + json_images(images)
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as s:
+            await s.post(base_url() + f"/session/{sid}/command",
+                         json={"command": COMMAND_NAME, "arguments": args})
+    except Exception:
+        pass
     return {"ok": True, "session_id": sid}
 
 

@@ -50,15 +50,38 @@ async def search(query, limit=20, page=1):
 
 async def get_workflow(result):
     url = result.get("workflow_url")
-    if not url:
-        ver_id = (result.get("extra") or {}).get("version_id")
-        if not ver_id:
-            return None
-        data = await fetch_json(f"{API}/model-versions/{ver_id}")
-        for f in (data.get("files") or []):
+    ver_id = (result.get("extra") or {}).get("version_id")
+    ver = None
+    if not url and ver_id:
+        ver = await fetch_json(f"{API}/model-versions/{ver_id}")
+        for f in (ver.get("files") or []):
             if (f.get("name") or "").lower().endswith(".json"):
                 url = f.get("downloadUrl")
                 break
-    if not url:
-        return None
-    return await fetch_json(url)
+    if url:
+        try:
+            return await fetch_json(url)
+        except Exception:
+            pass
+    if ver is None and ver_id:
+        try:
+            ver = await fetch_json(f"{API}/model-versions/{ver_id}")
+        except Exception:
+            return None
+    for img in (ver.get("images") or []) if ver else []:
+        meta = img.get("meta") or {}
+        wf = meta.get("workflow")
+        if isinstance(wf, dict) and "nodes" in wf:
+            return wf
+    for img in (ver.get("images") or []) if ver else []:
+        meta = img.get("meta") or {}
+        wf = meta.get("workflow") or meta.get("prompt")
+        if isinstance(wf, str):
+            import json
+            try:
+                wf = json.loads(wf)
+            except Exception:
+                continue
+        if isinstance(wf, dict) and (("nodes" in wf) or any(isinstance(v, dict) and "class_type" in v for v in wf.values())):
+            return wf
+    return None

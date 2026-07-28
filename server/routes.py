@@ -169,6 +169,8 @@ async def job_status(request):
 @routes.post("/ai_executor/run")
 async def run(request):
     body = await request.json()
+    if not candidates.check_token(body.get("batch_id", ""), body.get("token", "")):
+        return web.json_response({"ok": False, "error": "invalid token: 用户必须先在面板中选定候选工作流"}, status=403)
     wf = body.get("workflow")
     if wf is None:
         return web.json_response({"error": "workflow required"}, status=400)

@@ -71,5 +71,5 @@
 | POST | `/deps/check` | 4 |
 | POST | `/install/nodes` `/install/model` | 4 |
 | GET | `/jobs/{job_id}` | 4 |
-| POST | `/run` {workflow,params?,images?} | 4 (仅用户明确要求直接运行时) |
+| POST | `/run` {batch_id,token,workflow,params?,images?} | 4 (需token,仅用户明确要求直接运行时) |
 | GET | `/run_status/{prompt_id}` | 4 |

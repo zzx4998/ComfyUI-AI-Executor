@@ -10,7 +10,7 @@ import zipfile
 
 import aiohttp
 
-from . import installer, proxy
+from . import installer, proxy, supervisor
 
 PLUGIN_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WORKDIR = os.path.join(PLUGIN_DIR, "opencode")
@@ -261,14 +261,22 @@ def build_runtime_config():
 
 
 def start(port=4097):
-    if _state["proc"] and _state["proc"].poll() is None:
-        return {"ok": True, "already": True, "port": _state["port"]}
     exe = find_exe()
     if not exe:
-        return {"ok": False, "error": "opencode executable not found on PATH. Install: npm i -g opencode-ai"}
+        return {"ok": False, "error": "opencode executable not found. 请先安装"}
     os.makedirs(WORKDIR, exist_ok=True)
     extra_env = build_runtime_config()
     _state["port"] = port
+    sup = supervisor.ensure_running()
+    if sup:
+        try:
+            r = supervisor.opencode_start(sup, exe, WORKDIR, port, extra_env)
+            if r.get("ok"):
+                return {"ok": True, "port": port, "via": "supervisor", "custom_llm": bool(extra_env)}
+        except Exception as e:
+            installer._log({"log": []}, f"supervisor start failed: {e}")
+    if _state["proc"] and _state["proc"].poll() is None:
+        return {"ok": True, "already": True, "port": _state["port"]}
     creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     env = dict(os.environ)
     env.update(extra_env)
@@ -279,10 +287,16 @@ def start(port=4097):
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         creationflags=creationflags,
     )
-    return {"ok": True, "pid": _state["proc"].pid, "port": port, "custom_llm": bool(extra_env)}
+    return {"ok": True, "pid": _state["proc"].pid, "port": port, "via": "direct", "custom_llm": bool(extra_env)}
 
 
 def stop():
+    sup = supervisor.find_supervisor()
+    if sup:
+        try:
+            supervisor.opencode_stop(sup)
+        except Exception:
+            pass
     proc = _state["proc"]
     if proc and proc.poll() is None:
         proc.terminate()

@@ -17,6 +17,9 @@
     "glob": "allow",
     "grep": "allow"
   },
+  "tools": {
+    "question": false
+  },
   "provider": {
     "aie-custom": {
       "npm": "@ai-sdk/openai-compatible",

@@ -459,6 +459,10 @@ async function ocPoll() {
           logmsg("[代理] " + p.text.slice(0, 1500));
         } else if (p.type === "tool") {
           lastTool = p.tool || lastTool;
+          if (p.tool === "question" && p.state?.status === "running" && !oc.qwarned) {
+            oc.qwarned = true;
+            logmsg("⚠ 代理调用了交互式提问工具导致卡住,请点「中止」后重新派单(新版配置已禁用该工具,需重启 opencode 服务)");
+          }
           if (p.state?.status === "completed" || p.state?.status === "error") {
             if (oc["seen_" + key]) continue;
             oc["seen_" + key] = true;

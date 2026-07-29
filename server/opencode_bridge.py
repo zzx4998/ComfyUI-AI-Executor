@@ -472,5 +472,21 @@ async def session_status():
     return await _get("/session/status")
 
 
+async def questions():
+    try:
+        data = await _get("/question")
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+async def question_reply(question_id, answers):
+    return await _post(f"/question/{question_id}/reply", {"answers": answers})
+
+
+async def question_reject(question_id):
+    return await _post(f"/question/{question_id}/reject", {})
+
+
 async def abort(session_id):
     return await _post(f"/session/{session_id}/abort", {})

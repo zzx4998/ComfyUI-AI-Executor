@@ -293,6 +293,33 @@ async def oc_sessions_status(request):
     return web.json_response(await opencode_bridge.session_status())
 
 
+@routes.get("/ai_executor/opencode/questions")
+async def oc_questions(request):
+    return web.json_response({"questions": await opencode_bridge.questions()})
+
+
+@routes.post("/ai_executor/opencode/questions/{qid}/reply")
+async def oc_question_reply(request):
+    body = await request.json()
+    answers = body.get("answers")
+    if not isinstance(answers, list) or not answers:
+        return web.json_response({"ok": False, "error": "answers required"}, status=400)
+    try:
+        await opencode_bridge.question_reply(request.match_info["qid"], answers)
+        return web.json_response({"ok": True})
+    except Exception as e:
+        return web.json_response({"ok": False, "error": str(e)})
+
+
+@routes.post("/ai_executor/opencode/questions/{qid}/reject")
+async def oc_question_reject(request):
+    try:
+        await opencode_bridge.question_reject(request.match_info["qid"])
+        return web.json_response({"ok": True})
+    except Exception as e:
+        return web.json_response({"ok": False, "error": str(e)})
+
+
 @routes.post("/ai_executor/opencode/abort/{session_id}")
 async def oc_abort(request):
     return web.json_response(await opencode_bridge.abort(request.match_info["session_id"]))

@@ -459,10 +459,6 @@ async function ocPoll() {
           logmsg("[代理] " + p.text.slice(0, 1500));
         } else if (p.type === "tool") {
           lastTool = p.tool || lastTool;
-          if (p.tool === "question" && p.state?.status === "running" && !oc.qwarned) {
-            oc.qwarned = true;
-            logmsg("⚠ 代理调用了交互式提问工具导致卡住,请点「中止」后重新派单(新版配置已禁用该工具,需重启 opencode 服务)");
-          }
           if (p.state?.status === "completed" || p.state?.status === "error") {
             if (oc["seen_" + key]) continue;
             oc["seen_" + key] = true;
@@ -512,6 +508,21 @@ async function candidatesPoll() {
       if (elx) elx.remove();
     }
   } catch { /* ignore */ }
+  try {
+    const qs = await api("/opencode/questions");
+    const ids = new Set();
+    for (const q of qs.questions || []) {
+      ids.add(q.id);
+      if (cand["q_" + q.id]) continue;
+      cand["q_" + q.id] = true;
+      renderQuestion(box, q);
+      logmsg("代理向你提问,请在卡片中回答");
+      ocSetBusy(true, "等待你回答代理的提问...");
+    }
+    for (const k of Object.keys(cand)) {
+      if (k.startsWith("q_") && !ids.has(k.slice(2))) delete cand[k];
+    }
+  } catch { /* ignore */ }
   if (cand.chosenBatch) {
     try {
       const b = await api(`/candidates/batch/${cand.chosenBatch}`);
@@ -552,6 +563,51 @@ function renderRestartConfirm(box, pending) {
       } }, "忽略"),
     ]),
   ]);
+  box.append(card);
+}
+
+function renderQuestion(box, req) {
+  const card = el("div", { class: "aie-card", id: "aie-q-" + req.id, style: "border-color:#667eea;" });
+  const answers = [];
+  (req.questions || []).forEach((q, qi) => {
+    answers.push(null);
+    card.append(el("div", { style: "font-weight:600;color:#9db4f0;" }, `❓ ${q.header || "代理提问"}`));
+    card.append(el("div", { style: "color:#ddd;margin:4px 0;white-space:pre-wrap;" }, q.question || ""));
+    const optBox = el("div", { style: "display:flex;flex-direction:column;gap:4px;margin:4px 0;" });
+    for (const opt of q.options || []) {
+      const b = el("button", { class: "aie-btn", style: "text-align:left;", onclick: () => {
+        answers[qi] = opt.label;
+        optBox.querySelectorAll("button").forEach(x => x.style.borderColor = "#46465a");
+        b.style.borderColor = "#667eea";
+        b.style.background = "#2b3350";
+      } }, opt.label + (opt.description ? ` — ${opt.description}` : ""));
+      optBox.append(b);
+    }
+    card.append(optBox);
+  });
+  const custom = el("input", { class: "aie-input", placeholder: "或输入自定义回答(留空则用上方选中项)" });
+  const submit = el("button", { class: "aie-btn aie-btn-primary", onclick: async () => {
+    const final = answers.map((a, i) => [custom.value.trim() || a].filter(Boolean));
+    if (final.every(f => !f.length)) { logmsg("请先选择一个选项或输入自定义回答"); return; }
+    submit.disabled = true;
+    const r = await post(`/opencode/questions/${req.id}/reply`, { answers: final });
+    if (r.ok) {
+      card.remove();
+      delete cand["q_" + req.id];
+      logmsg("已回答代理: " + JSON.stringify(final));
+      ocSetBusy(true, "代理继续执行...");
+    } else {
+      submit.disabled = false;
+      logmsg("回答提交失败: " + (r.error || ""));
+    }
+  } }, "提交回答");
+  const reject = el("button", { class: "aie-btn", onclick: async () => {
+    await post(`/opencode/questions/${req.id}/reject`, {});
+    card.remove();
+    delete cand["q_" + req.id];
+    logmsg("已拒绝该提问");
+  } }, "拒绝");
+  card.append(custom, el("div", { style: "display:flex;gap:4px;margin-top:4px;" }, [submit, reject]));
   box.append(card);
 }
 
